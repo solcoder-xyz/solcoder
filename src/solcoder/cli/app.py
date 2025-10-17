@@ -3,14 +3,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from pathlib import Path
+from typing import Any, Literal, Protocol
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -20,24 +21,32 @@ from rich.panel import Panel
 from rich.text import Text
 
 from solcoder.core import (
-    ConfigManager,
+    AgentMessageError,
+    AgentToolResult,
     ConfigContext,
+    ConfigManager,
     DiagnosticResult,
     RenderOptions,
-    available_templates,
-    collect_environment_diagnostics,
-    render_template,
     TemplateError,
+    available_templates,
+    build_tool_manifest,
+    collect_environment_diagnostics,
+    manifest_to_prompt_section,
+    parse_agent_directive,
+    render_template,
 )
 from solcoder.core.llm import LLMError, LLMResponse
 from solcoder.core.tool_registry import (
-    ToolInvocationError,
     ToolRegistry,
     ToolRegistryError,
-    ToolResult,
     build_default_registry,
 )
-from solcoder.session import TRANSCRIPT_LIMIT, SessionContext, SessionManager, SessionLoadError
+from solcoder.session import (
+    TRANSCRIPT_LIMIT,
+    SessionContext,
+    SessionLoadError,
+    SessionManager,
+)
 from solcoder.session.manager import MAX_SESSIONS
 from solcoder.solana import SolanaRPCClient, WalletError, WalletManager, WalletStatus
 
@@ -52,6 +61,8 @@ DEFAULT_AUTO_COMPACT_THRESHOLD = 0.95
 DEFAULT_LLM_INPUT_LIMIT = 272_000
 DEFAULT_LLM_OUTPUT_LIMIT = 128_000
 DEFAULT_COMPACTION_COOLDOWN = 10
+DEFAULT_AGENT_MAX_ITERATIONS = 1000
+AGENT_PLAN_ACK = json.dumps({"type": "plan_ack", "status": "ready"})
 
 
 @dataclass
@@ -92,47 +103,47 @@ def _parse_template_tokens(
 
     idx = 0
     while idx < len(tokens):
-        token = tokens[idx]
-        if token == "--force":
+        option = tokens[idx]
+        if option == "--force":
             overwrite = True
             idx += 1
             continue
-        if token == "--program" and idx + 1 < len(tokens):
+        if option == "--program" and idx + 1 < len(tokens):
             program_name = tokens[idx + 1]
             idx += 2
             continue
-        if token.startswith("--program="):
-            program_name = token.split("=", 1)[1]
+        if option.startswith("--program="):
+            program_name = option.split("=", 1)[1]
             idx += 1
             continue
-        if token == "--author" and idx + 1 < len(tokens):
+        if option == "--author" and idx + 1 < len(tokens):
             author = tokens[idx + 1]
             idx += 2
             continue
-        if token.startswith("--author="):
-            author = token.split("=", 1)[1]
+        if option.startswith("--author="):
+            author = option.split("=", 1)[1]
             idx += 1
             continue
-        if token == "--program-id" and idx + 1 < len(tokens):
+        if option == "--program-id" and idx + 1 < len(tokens):
             program_id = tokens[idx + 1]
             idx += 2
             continue
-        if token.startswith("--program-id="):
-            program_id = token.split("=", 1)[1]
+        if option.startswith("--program-id="):
+            program_id = option.split("=", 1)[1]
             idx += 1
             continue
-        if token == "--cluster" and idx + 1 < len(tokens):
+        if option == "--cluster" and idx + 1 < len(tokens):
             cluster = tokens[idx + 1]
             idx += 2
             continue
-        if token.startswith("--cluster="):
-            cluster = token.split("=", 1)[1]
+        if option.startswith("--cluster="):
+            cluster = option.split("=", 1)[1]
             idx += 1
             continue
-        if token.startswith("-"):
-            return None, f"Unknown option '{token}'."
+        if option.startswith("-"):
+            return None, f"Unknown option '{option}'."
         if destination is None:
-            destination = Path(token)
+            destination = Path(option)
             idx += 1
             continue
         return None, "Unexpected extra argument."
@@ -194,10 +205,29 @@ class StubLLM:
         self.calls: list[str] = []
         self.model = "gpt-5-codex"
         self.reasoning_effort = "medium"
+        self._awaiting_ack = False
+        self._last_user_prompt = ""
 
     def respond(self, prompt: str) -> str:
         self.calls.append(prompt)
-        return f"[stub] I heard: {prompt}"
+        if not self._awaiting_ack:
+            self._awaiting_ack = True
+            self._last_user_prompt = prompt
+            payload = {
+                "type": "plan",
+                "message": "Stub plan for the request.",
+                "steps": [
+                    f"Consider the request: {prompt[:80]}",
+                    "Outline the response.",
+                ],
+            }
+        else:
+            self._awaiting_ack = False
+            payload = {
+                "type": "reply",
+                "message": f"[stub] Completed request: {self._last_user_prompt[:80]}",
+            }
+        return json.dumps(payload)
 
     def stream_chat(
         self,
@@ -362,61 +392,111 @@ class CLIApp:
     # ------------------------------------------------------------------
     # Command handlers
     # ------------------------------------------------------------------
-    def _chat_with_llm(self, prompt: str) -> CommandResponse:
-        history = self._conversation_history()
-        tokens: list[str] = []
+    def _max_agent_iterations(self) -> int:
+        return DEFAULT_AGENT_MAX_ITERATIONS
 
-        model_name = "unknown"
+    def _agent_system_prompt(self, manifest_json: str) -> str:
         provider_name = "unknown"
+        model_name = "unknown"
         reasoning_effort = "medium"
         if self.config_context:
-            model_name = self.config_context.config.llm_model
             provider_name = self.config_context.config.llm_provider
-            reasoning_effort = getattr(self.config_context.config, "llm_reasoning_effort", "medium")
+            model_name = self.config_context.config.llm_model
+            reasoning_effort = getattr(
+                self.config_context.config,
+                "llm_reasoning_effort",
+                "medium",
+            )
 
-        system_prompt = (
-            "You are SolCoder, an on-device coding assistant. Be helpful and concise. "
-            "When asked about your identity or configuration, accurately mention the active model, provider, "
-            "and reasoning effort without repeating this information unnecessarily.\n"
-            f"Current configuration: provider={provider_name}, model={model_name}, reasoning_effort={reasoning_effort}."
+        schema_description = (
+            "Schema:\n"
+            '{ "type": "plan|tool_request|reply|cancel",\n'
+            '  "message": string?,\n'
+            '  "step_title": string?,\n'
+            '  "tool": {"name": string, "args": object}?,\n'
+            '  "steps": string[]? }\n'
         )
 
-        try:
-            with self.console.status("[cyan]Thinking…[/cyan]", spinner="dots"):
-                result = self._llm.stream_chat(
-                    prompt,
-                    history=history,
-                    system_prompt=system_prompt,
-                    on_chunk=tokens.append,
-                )
-        except LLMError as exc:
-            logger.error("LLM error: %s", exc)
-            return CommandResponse(messages=[("system", f"LLM error: {exc}")])
+        return (
+            "You are SolCoder, an on-device coding assistant. Always respond with a single "
+            "JSON object that matches the schema below. Do not include Markdown or prose "
+            "outside the JSON value. Use compact JSON without extra commentary.\n\n"
+            f"{schema_description}"
+            "Rules:\n"
+            "1. The very first response for each new user message MUST be a plan directive "
+            '   with {"type":"plan","steps":[...]} describing the intended workflow.\n'
+            "2. When you need to run a tool, reply with "
+            '{"type":"tool_request","step_title":...,"tool":{"name":...,"args":{...}}}. '
+            "Keep arguments strictly within the declared schema.\n"
+            "3. Once work is complete, respond with "
+            '{"type":"reply","message":...}. Include any final user-facing summary there.\n'
+            "4. You may send {'type':'cancel','message':...} if the request cannot be "
+            "completed safely.\n"
+            "5. After your plan is acknowledged the orchestrator will send "
+            '{"type":"plan_ack","status":"ready"}; treat it as confirmation to continue.\n'
+            "6. After the orchestrator sends you tool results, continue the loop using the "
+            "latest context until you can emit a final reply.\n"
+            "7. Do not invent tools. Only use the manifest provided below.\n\n"
+            f"Current configuration: provider={provider_name}, model={model_name}, "
+            f"reasoning_effort={reasoning_effort}.\n"
+            f"Available tools: {manifest_json}\n"
+            "During the conversation you may also receive JSON objects with "
+            '{"type":"tool_result",...}. Use them to inform the next action.'
+        )
 
-        reply_text = "".join(tokens) or getattr(result, "text", "")
-        if not reply_text:
-            reply_text = "[no response]"
+    @staticmethod
+    def _format_plan_message(steps: list[str], preamble: str | None) -> str:
+        heading = preamble or "Agent plan:"
+        bullet_lines = "\n".join(f"- {step}" for step in steps)
+        return f"{heading}\n{bullet_lines}"
 
-        self._render_message("agent", reply_text)
+    @staticmethod
+    def _format_tool_preview(step_title: str, content: str) -> str:
+        return f"{step_title}\n{content}"
 
-        summary = [
-            {
-                "type": "llm",
-                "name": f"{provider_name}:{model_name}",
-                "status": "cached" if getattr(result, "cached", False) else "success",
-                "latency": round(getattr(result, "latency_seconds", 0.0), 3),
-            }
-        ]
-        finish_reason = getattr(result, "finish_reason", None)
-        if finish_reason:
-            summary[0]["summary"] = f"finish={finish_reason}"
-        token_usage = getattr(result, "token_usage", None)
-        if token_usage:
-            summary[0]["token_usage"] = token_usage
-        reported_effort = getattr(self.config_context.config, "llm_reasoning_effort", None) if self.config_context else None
-        if reported_effort:
-            summary[0]["reasoning_effort"] = reported_effort
-        if token_usage:
+    def _chat_with_llm(self, prompt: str) -> CommandResponse:
+        history = self._conversation_history()
+        manifest = build_tool_manifest(self.tool_registry)
+        manifest_json = manifest_to_prompt_section(manifest)
+        system_prompt = self._agent_system_prompt(manifest_json)
+
+        loop_history = list(history)
+        pending_prompt = prompt
+        plan_received = False
+        max_iterations = self._max_agent_iterations()
+        rendered_roles: set[str] = set()
+        display_messages: list[tuple[str, str]] = []
+        tool_summaries: list[dict[str, Any]] = []
+        total_latency = 0.0
+        total_input_tokens = 0
+        total_output_tokens = 0
+        last_finish_reason: str | None = None
+        all_cached = True
+        retry_payload: str | None = None
+
+        provider_name = "unknown"
+        model_name = "unknown"
+        reasoning_effort = "medium"
+        if self.config_context:
+            provider_name = self.config_context.config.llm_provider
+            model_name = self.config_context.config.llm_model
+            reasoning_effort = getattr(
+                self.config_context.config,
+                "llm_reasoning_effort",
+                "medium",
+            )
+
+        def _accumulate_usage(result: LLMResponse) -> None:
+            nonlocal total_latency, total_input_tokens, total_output_tokens, last_finish_reason, all_cached
+            total_latency += getattr(result, "latency_seconds", 0.0)
+            finish = getattr(result, "finish_reason", None)
+            if finish:
+                last_finish_reason = finish
+            if not getattr(result, "cached", False):
+                all_cached = False
+            token_usage = getattr(result, "token_usage", None)
+            if not token_usage:
+                return
             input_tokens = int(
                 token_usage.get("input_tokens")
                 or token_usage.get("prompt_tokens")
@@ -427,16 +507,218 @@ class CLIApp:
                 or token_usage.get("completion_tokens")
                 or 0
             )
+            input_tokens = max(input_tokens, 0)
+            output_tokens = max(output_tokens, 0)
+            total_input_tokens += input_tokens
+            total_output_tokens += output_tokens
             metadata = self.session_context.metadata
-            metadata.llm_input_tokens += max(input_tokens, 0)
-            metadata.llm_output_tokens += max(output_tokens, 0)
-            metadata.llm_last_input_tokens = max(input_tokens, 0)
-            metadata.llm_last_output_tokens = max(output_tokens, 0)
+            metadata.llm_input_tokens += input_tokens
+            metadata.llm_output_tokens += output_tokens
+            metadata.llm_last_input_tokens = input_tokens
+            metadata.llm_last_output_tokens = output_tokens
+
+        iteration = 0
+        cancelled = False
+        status_message = "[cyan]Thinking…[/cyan]"
+        with self.console.status(status_message, spinner="dots") as status_indicator:
+            try:
+                while iteration < max_iterations:
+                    iteration += 1
+                    status_indicator.update(status_message)
+                    tokens: list[str] = []
+                    try:
+                        result = self._llm.stream_chat(
+                            pending_prompt,
+                            history=loop_history,
+                            system_prompt=system_prompt,
+                            on_chunk=tokens.append,
+                        )
+                    except LLMError as exc:
+                        logger.error("LLM error: %s", exc)
+                        error_message = f"LLM error: {exc}"
+                        display_messages.append(("system", error_message))
+                        self._render_message("system", error_message)
+                        rendered_roles.add("system")
+                        break
+
+                    reply_text = "".join(tokens) or getattr(result, "text", "")
+                    loop_history.append({"role": "user", "content": pending_prompt})
+                    loop_history.append({"role": "assistant", "content": reply_text})
+
+                    if not reply_text:
+                        error_message = "LLM returned an empty directive."
+                        display_messages.append(("system", error_message))
+                        self._render_message("system", error_message)
+                        rendered_roles.add("system")
+                        break
+
+                    try:
+                        directive = parse_agent_directive(reply_text)
+                    except AgentMessageError as exc:
+                        logger.debug("Directive parse error: %s", exc)
+                        if retry_payload is not None:
+                            error_message = (
+                                "LLM failed to provide a valid directive after a retry. "
+                                f"Error: {exc}"
+                            )
+                            display_messages.append(("system", error_message))
+                            self._render_message("system", error_message)
+                            rendered_roles.add("system")
+                            break
+                        retry_payload = json.dumps(
+                            {
+                                "type": "error",
+                                "message": (
+                                    "Invalid directive received. Respond with a valid JSON "
+                                    "object that matches the declared schema."
+                                ),
+                                "details": str(exc),
+                            }
+                        )
+                        pending_prompt = retry_payload
+                        continue
+
+                    retry_payload = None
+                    _accumulate_usage(result)
+
+                    if not plan_received:
+                        if directive.type != "plan":
+                            pending_prompt = json.dumps(
+                                {
+                                    "type": "error",
+                                    "message": "First response must use type='plan' with steps.",
+                                }
+                            )
+                            continue
+                        plan_received = True
+                        plan_text = self._format_plan_message(directive.steps or [], directive.message)
+                        display_messages.append(("agent", plan_text))
+                        self._render_message("agent", plan_text)
+                        rendered_roles.add("agent")
+                        if directive.steps:
+                            status_message = f"[cyan]{directive.steps[0]}[/cyan]"
+                        pending_prompt = AGENT_PLAN_ACK
+                        continue
+
+                    if directive.type == "plan":
+                        plan_text = self._format_plan_message(directive.steps or [], directive.message)
+                        display_messages.append(("agent", plan_text))
+                        self._render_message("agent", plan_text)
+                        rendered_roles.add("agent")
+                        if directive.steps:
+                            status_message = f"[cyan]{directive.steps[0]}[/cyan]"
+                        pending_prompt = AGENT_PLAN_ACK
+                        continue
+
+                    if directive.type == "tool_request":
+                        tool_name = directive.tool.name
+                        step_title = directive.step_title or tool_name
+                        tool_args = directive.tool.args
+                        status_message = f"[cyan]{step_title}[/cyan]"
+                        status_indicator.update(status_message)
+                        try:
+                            tool_result = self.tool_registry.invoke(tool_name, tool_args)
+                            status: Literal["success", "error"] = "success"
+                            output = tool_result.content
+                            payload_data = tool_result.data
+                        except ToolRegistryError as exc:
+                            status = "error"
+                            output = str(exc)
+                            payload_data = None
+                            logger.warning("Tool '%s' failed: %s", tool_name, exc)
+
+                        preview = self._format_tool_preview(step_title, output)
+                        display_messages.append(("agent", preview))
+                        self._render_message("agent", preview)
+                        rendered_roles.add("agent")
+
+                        summary_entry: dict[str, Any] = {
+                            "type": "tool",
+                            "name": tool_name,
+                            "status": status,
+                            "summary": step_title,
+                        }
+                        if payload_data is not None:
+                            summary_entry["data"] = payload_data
+                        tool_summaries.append(summary_entry)
+
+                        tool_payload = AgentToolResult(
+                            tool_name=tool_name,
+                            step_title=step_title,
+                            status=status,
+                            output=output,
+                            data=payload_data,
+                        )
+                        pending_prompt = json.dumps(
+                            tool_payload.model_dump(mode="json", exclude_none=True),
+                            ensure_ascii=False,
+                            default=str,
+                        )
+                        continue
+
+                    if directive.type == "reply":
+                        final_message = directive.message or ""
+                        if directive.step_title:
+                            final_message = f"{directive.step_title}\n{final_message}"
+                        display_messages.append(("agent", final_message))
+                        self._render_message("agent", final_message)
+                        rendered_roles.add("agent")
+                        status_message = "[cyan]Thinking…[/cyan]"
+                        break
+
+                    if directive.type == "cancel":
+                        cancel_message = directive.message or "Agent cancelled the request."
+                        display_messages.append(("system", cancel_message))
+                        self._render_message("system", cancel_message)
+                        rendered_roles.add("system")
+                        status_message = "[cyan]Thinking…[/cyan]"
+                        break
+            except KeyboardInterrupt:
+                cancelled = True
+                cancel_message = "Interrupted by user."
+                display_messages.append(("system", cancel_message))
+                self._render_message("system", cancel_message)
+                rendered_roles.add("system")
+                status_message = "[cyan]Thinking…[/cyan]"
+
+        if not display_messages:
+            if cancelled:
+                display_messages.append(("system", "Agent loop cancelled."))
+            else:
+                display_messages.append(
+                    ("system", "No response generated from the agent loop.")
+                )
+
+        if iteration >= max_iterations and not cancelled and display_messages[-1][0] != "system":
+            timeout_message = "Agent loop stopped after reaching the iteration limit."
+            display_messages.append(("system", timeout_message))
+            self._render_message("system", timeout_message)
+            rendered_roles.add("system")
+
+        total_tokens = total_input_tokens + total_output_tokens
+        llm_summary: dict[str, Any] = {
+            "type": "llm",
+            "name": f"{provider_name}:{model_name}",
+            "status": "cached" if all_cached else "success",
+            "latency": round(total_latency, 3),
+        }
+        if last_finish_reason:
+            llm_summary["summary"] = f"finish={last_finish_reason}"
+        if total_tokens:
+            llm_summary["token_usage"] = {
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "total_tokens": total_tokens,
+            }
+        if reasoning_effort:
+            llm_summary["reasoning_effort"] = reasoning_effort
+
+        tool_calls = [llm_summary, *tool_summaries]
 
         return CommandResponse(
-            messages=[("agent", reply_text)],
-            tool_calls=summary,
-            rendered_roles={"agent"},
+            messages=display_messages,
+            tool_calls=tool_calls,
+            rendered_roles=rendered_roles or None,
         )
 
     def _conversation_history(self) -> list[dict[str, str]]:
@@ -844,7 +1126,8 @@ class CLIApp:
         options, error = _parse_template_tokens(template_name, args[1:], defaults)
         if error:
             return CommandResponse(messages=[("system", error)])
-        assert options is not None
+        if options is None:
+            return CommandResponse(messages=[("system", "Unable to parse template options.")])
         try:
             output = render_template(options)
         except TemplateError as exc:

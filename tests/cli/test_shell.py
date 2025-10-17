@@ -1,21 +1,24 @@
+import importlib
 import json
 import os
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
-from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from rich.console import Console
 
-import importlib
-
-cli_app_module = importlib.import_module("solcoder.cli.app")
-CLIApp = cli_app_module.CLIApp
-StubLLM = cli_app_module.StubLLM
+from solcoder.cli.app import AGENT_PLAN_ACK, CLIApp, StubLLM
+from solcoder.core.config import ConfigContext, ConfigManager, SolCoderConfig
+from solcoder.core.env_diag import DiagnosticResult
+from solcoder.core.llm import LLMResponse
+from solcoder.core.tool_registry import Tool, ToolResult, build_default_registry
 from solcoder.session import SessionManager
 from solcoder.solana import WalletManager
-from solcoder.core.env_diag import DiagnosticResult
-from solcoder.core.config import ConfigContext, ConfigManager, SolCoderConfig
+
+cli_app_module = importlib.import_module("solcoder.cli.app")
 
 
 class RPCStub:
@@ -26,6 +29,87 @@ class RPCStub:
         if self.balances:
             return self.balances.pop(0)
         return 0.0
+
+
+class ScriptedLLM:
+    """LLM stub that replays scripted JSON directives."""
+
+    def __init__(self, script: list[dict[str, Any]]) -> None:
+        self.script = script
+        self.calls: list[str] = []
+        self.model = "scripted-model"
+        self.reasoning_effort = "medium"
+
+    def stream_chat(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+        history: Sequence[dict[str, str]] | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> LLMResponse:
+        if not self.script:
+            raise AssertionError("No scripted responses remaining")
+        entry = self.script.pop(0)
+        expect = entry.get("expect")
+        if expect:
+            expect(prompt)
+
+        reply_value = entry["reply"]
+        if callable(reply_value):
+            reply_value = reply_value(prompt)
+        reply = json.dumps(reply_value) if isinstance(reply_value, dict) else str(reply_value)
+
+        self.calls.append(prompt)
+        if on_chunk:
+            on_chunk(reply)
+
+        token_usage = entry.get("token_usage")
+        if token_usage is None:
+            in_tokens = max(len(prompt.split()), 1)
+            out_tokens = max(len(reply.split()), 1)
+            token_usage = {
+                "input_tokens": in_tokens,
+                "output_tokens": out_tokens,
+                "total_tokens": in_tokens + out_tokens,
+            }
+
+        return LLMResponse(
+            text=reply,
+            latency_seconds=entry.get("latency", 0.0),
+            finish_reason=entry.get("finish_reason"),
+            token_usage=token_usage,
+            cached=entry.get("cached", True),
+        )
+
+    def update_settings(self, *, model: str | None = None, reasoning_effort: str | None = None) -> None:
+        if model:
+            self.model = model
+        if reasoning_effort:
+            self.reasoning_effort = reasoning_effort
+
+
+def expect_equals(expected: str) -> Callable[[str], None]:
+    def _check(actual: str) -> None:
+        assert actual == expected, f"Expected prompt '{expected}' but received '{actual}'"
+
+    return _check
+
+
+def expect_tool_result(tool_name: str) -> Callable[[str], None]:
+    def _check(actual: str) -> None:
+        payload = json.loads(actual)
+        assert payload["type"] == "tool_result"
+        assert payload["tool_name"] == tool_name
+
+    return _check
+
+
+def expect_contains(fragment: str) -> Callable[[str], None]:
+    def _check(actual: str) -> None:
+        assert fragment in actual
+
+    return _check
 
 
 @pytest.fixture()
@@ -97,9 +181,13 @@ def test_chat_message_invokes_llm(
 
     response = app.handle_line("hello solcoder")
 
-    assert llm.calls == ["hello solcoder"]
+    assert llm.calls == ["hello solcoder", AGENT_PLAN_ACK]
     assert response.continue_loop is True
     assert response.messages and response.messages[0][0] == "agent"
+    plan_message = response.messages[0][1]
+    assert "Stub plan" in plan_message
+    assert response.messages[-1][0] == "agent"
+    assert "[stub] Completed request" in response.messages[-1][1]
     assert response.rendered_roles == {"agent"}
     assert response.tool_calls and response.tool_calls[0]["type"] == "llm"
     assert response.tool_calls[0]["status"] == "cached"
@@ -112,6 +200,122 @@ def test_chat_message_invokes_llm(
     assert "hello solcoder" in state_path.read_text()
 
 
+def test_agent_loop_runs_tool(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    captured: list[dict[str, Any]] = []
+    registry = build_default_registry()
+
+    def handler(payload: dict[str, Any]) -> ToolResult:
+        captured.append(payload)
+        return ToolResult(content=f"Echo: {payload['text']}", data=payload)
+
+    registry.register(
+        Tool(
+            name="test_echo",
+            description="Test echo tool",
+            input_schema={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+            output_schema={"type": "object"},
+            handler=handler,
+        )
+    )
+
+    script = [
+        {"expect": expect_equals("run tool please"), "reply": {"type": "plan", "message": "Plan ready", "steps": ["Call test_echo"]}},
+        {"expect": expect_equals(AGENT_PLAN_ACK), "reply": {"type": "tool_request", "step_title": "Echo step", "tool": {"name": "test_echo", "args": {"text": "hi"}}}},
+        {"expect": expect_tool_result("test_echo"), "reply": {"type": "reply", "message": "All done"}},
+    ]
+    llm = ScriptedLLM(script)
+
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+        tool_registry=registry,
+    )
+
+    response = app.handle_line("run tool please")
+
+    assert captured == [{"text": "hi"}]
+    assert any("Echo step" in message for _, message in response.messages)
+    tool_entries = [entry for entry in response.tool_calls if entry.get("type") == "tool"]
+    assert tool_entries and tool_entries[0]["name"] == "test_echo"
+    assert tool_entries[0]["status"] == "success"
+    assert llm.script == []
+    assert llm.calls[0] == "run tool please"
+    assert llm.calls[1] == AGENT_PLAN_ACK
+
+
+def test_agent_loop_recovers_from_invalid_json(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    script = [
+        {"expect": expect_equals("walk me through"), "reply": "not json"},
+        {"expect": expect_contains('"type": "error"'), "reply": {"type": "plan", "message": "Recovered plan", "steps": ["Retry step"]}},
+        {"expect": expect_equals(AGENT_PLAN_ACK), "reply": {"type": "reply", "message": "Recovered"}},
+    ]
+    llm = ScriptedLLM(script)
+
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+    )
+
+    response = app.handle_line("walk me through")
+
+    assert llm.script == []
+    assert all(role != "system" for role, _ in response.messages)
+    assert response.messages[0][0] == "agent"
+    assert "Recovered plan" in response.messages[0][1]
+    assert response.messages[-1][1].startswith("Recovered")
+
+
+def test_agent_loop_reports_invalid_json_twice(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    script = [
+        {"expect": expect_equals("bad response please"), "reply": "still wrong"},
+        {"expect": expect_contains('"type": "error"'), "reply": "also wrong"},
+    ]
+    llm = ScriptedLLM(script)
+
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+    )
+
+    response = app.handle_line("bad response please")
+
+    assert response.messages[-1][0] == "system"
+    assert "failed to provide a valid directive" in response.messages[-1][1]
+    assert llm.script == []
 def test_quit_command_exits(
     console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
 ) -> None:

@@ -1,7 +1,7 @@
 # Task 2.5 — Agent Tool Registry Integration
 
 - Milestone: [MILESTONE-2_CONVERSATIONAL_CORE](../milestones/MILESTONE-2_CONVERSATIONAL_CORE.md)
-- Status: In progress — started 2025-10-17 (prep for Milestone 2 kickoff)
+- Status: Completed — finished 2025-10-18 (prep for Milestone 2 kickoff)
 
 ## Objective
 Expose deterministic Python callables for plan/code/review/deploy so the LLM orchestrator can choose tools, with fallbacks when the model is unavailable.
@@ -32,3 +32,8 @@ Expose deterministic Python callables for plan/code/review/deploy so the LLM orc
 
 ## Owners
 - CLI engineer and Tech Lead (LLM orchestration), QA validates fallback behavior.
+
+## Outcome
+- Tool registry shipped with modules for planning, coding, reviewing, deployment, diagnostics, knowledge stubs, and shell command execution.
+- CLI commands and LLM orchestration now honor the registry, including offline fallbacks and command invocations.
+- Regression tests in `tests/core/test_tool_registry.py` and CLI coverage ensure continued stability.

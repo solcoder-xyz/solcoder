@@ -7,11 +7,25 @@ from .config import (
     ConfigurationError,
     SolCoderConfig,
 )
+from .agent import (
+    AgentDirective,
+    AgentMessageError,
+    AgentToolResult,
+    build_tool_manifest,
+    manifest_to_prompt_section,
+    parse_agent_directive,
+)
 from .env_diag import DiagnosticResult, ToolRequirement, collect_environment_diagnostics
 from .templates import RenderOptions, TemplateError, TemplateExistsError, TemplateNotFoundError, available_templates, render_template
 from .tool_registry import ToolRegistry, ToolRegistryError, ToolResult, build_default_registry
 
 __all__ = [
+    "AgentDirective",
+    "AgentMessageError",
+    "AgentToolResult",
+    "build_tool_manifest",
+    "manifest_to_prompt_section",
+    "parse_agent_directive",
     "ConfigManager",
     "ConfigContext",
     "SolCoderConfig",
