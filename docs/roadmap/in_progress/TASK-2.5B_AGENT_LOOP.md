@@ -4,10 +4,10 @@
 - Status: Proposed (next up after 2.5)
 
 ## Objective
-Teach the SolCoder LLM bridge to operate in an agentic loop: every LLM turn should receive the active module/tool manifest, decide whether to respond directly or invoke a registry tool, and exchange structured JSON describing the chosen action. Each tool request must include a short “step title” (e.g. *“Inspecting workspace tree”*) that the CLI can surface to the user while work is in progress. The CLI becomes the orchestrator that parses LLM decisions, runs tools, streams the step titles and tool outputs back to the user, and feeds those results into the conversation until the LLM returns a final answer.
+Teach the SolCoder LLM bridge to operate in an agentic loop: every LLM turn should receive the active module/tool manifest, decide whether to respond directly or invoke a registry tool, and exchange structured JSON describing the chosen action. Responses can take three shapes: (1) a final reply for the user, (2) a tool request with a short “step title” describing the action, or (3) a mixed response that emits a user-facing message while requesting another tool. The CLI becomes the orchestrator that parses LLM decisions, runs tools, streams the step titles and tool outputs back to the user, and feeds those results into the conversation until the LLM returns a final answer.
 
 ## Deliverables
-- JSON schema for LLM⇄orchestrator messages (fields for `type: reply|tool_request|tool_result`, step title, tool name, arguments, etc.).
+- JSON schema for LLM⇄orchestrator messages (fields for `type: reply|tool_request|tool_result|plan|cancel`, optional `message` when the LLM wants to address the user, step title, tool name, arguments, etc.).
 - First-turn plan phase: the LLM should begin with `{type: "plan", steps: [...]}` so we can render a checklist (reusing the planning tool for default content) before executing any tools.
 - Conversation driver that wraps `_chat_with_llm` in a loop: send system prompt + manifest, receive JSON, branch on action, execute tool via registry when requested, append tool output, repeat until `reply`.
 - Tool manifest generator that enumerates modules/tools (name, description, args schema) and injects it into the system prompt each turn, so the LLM has the latest capability map.
@@ -16,11 +16,12 @@ Teach the SolCoder LLM bridge to operate in an agentic loop: every LLM turn shou
 - Tests covering direct reply, single tool call, multi-step tool loop, malformed payload fallback, and UI preview rendering.
 
 ## Key Steps
-1. **Schema design** – Draft a JSON schema (or Pydantic model) describing LLM directives, including `type`, `step_title`, `content`, optional `tool` object with `name`, `args` dict, and a flag for whether the LLM expects more tool iterations.
+1. **Schema design** – Draft a JSON schema (or Pydantic model) describing LLM directives, including `type`, `step_title`, optional `message`, optional `tool` object with `name`, `args` dict, and a flag for whether the LLM expects more tool iterations.
 2. **Manifest injection** – Build a serialiser that walks `ToolRegistry.available_modules()` to produce a compact manifest (module name/version/description, tool list with names/descriptions/args schema) for the system prompt.
 3. **Loop controller** – Replace the one-shot `_chat_with_llm` call with a controller that:
    - Sends user message + manifest to LLM.
    - Parses JSON response (with validation).
+   - Displays any `message` field returned by the LLM to the user immediately.
    - Executes tool when requested (including accumulating tool outputs into the transcript and returning the tool result to the LLM as context).
    - Iterates until LLM returns `type="reply"`.
    - Supports Ctrl+C cancellation by propagating a `{type:"cancel"}` directive to the loop and enforcing tool timeouts.
