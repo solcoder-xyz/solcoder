@@ -30,6 +30,13 @@ from solcoder.core import (
     TemplateError,
 )
 from solcoder.core.llm import LLMError, LLMResponse
+from solcoder.core.tool_registry import (
+    ToolInvocationError,
+    ToolRegistry,
+    ToolRegistryError,
+    ToolResult,
+    build_default_registry,
+)
 from solcoder.session import TRANSCRIPT_LIMIT, SessionContext, SessionManager, SessionLoadError
 from solcoder.session.manager import MAX_SESSIONS
 from solcoder.solana import SolanaRPCClient, WalletError, WalletManager, WalletStatus
@@ -237,6 +244,7 @@ class CLIApp:
         session_manager: SessionManager | None = None,
         wallet_manager: WalletManager | None = None,
         rpc_client: SolanaRPCClient | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self.console = console or CLIApp._default_console()
         self.config_context = config_context
@@ -254,6 +262,7 @@ class CLIApp:
         self.command_router = CommandRouter()
         self._register_builtin_commands()
         self._llm: LLMBackend = llm or StubLLM()
+        self.tool_registry = tool_registry or build_default_registry()
         self._transcript = self.session_context.transcript
         initial_status = self.wallet_manager.status()
         initial_balance = self._fetch_balance(initial_status.public_key)
@@ -288,6 +297,9 @@ class CLIApp:
         )
         self.command_router.register(
             SlashCommand("template", CLIApp._handle_template, "Template scaffolding commands"),
+        )
+        self.command_router.register(
+            SlashCommand("modules", CLIApp._handle_modules, "List tool modules and tools"),
         )
 
     # ------------------------------------------------------------------
@@ -472,6 +484,31 @@ class CLIApp:
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to persist LLM settings: %s", exc)
+
+    def _invoke_tool(self, tool_name: str, payload: dict[str, Any]) -> CommandResponse:
+        try:
+            result = self.tool_registry.invoke(tool_name, payload)
+        except ToolRegistryError as exc:
+            tool_calls = [
+                {
+                    "type": "tool",
+                    "name": tool_name,
+                    "status": "error",
+                    "summary": str(exc),
+                }
+            ]
+            return CommandResponse(messages=[("system", f"Tool error: {exc}")], tool_calls=tool_calls)
+
+        summary_text = result.summary or result.content.splitlines()[0][:120] if result.content else ""
+        tool_calls = [
+            {
+                "type": "tool",
+                "name": tool_name,
+                "status": "success",
+                "summary": summary_text,
+            }
+        ]
+        return CommandResponse(messages=[("system", result.content)], tool_calls=tool_calls)
 
     def _compress_history_if_needed(self) -> None:
         transcript = self.session_context.transcript
@@ -685,6 +722,30 @@ class CLIApp:
                 )
             ]
         )
+
+    @staticmethod
+    def _handle_modules(app: CLIApp, args: list[str]) -> CommandResponse:
+        modules = app.tool_registry.available_modules()
+        if not args or args[0].lower() == "list":
+            if not modules:
+                return CommandResponse(messages=[("system", "No modules registered.")])
+            lines = [
+                f"{name}\t{module.description} (v{module.version})"
+                for name, module in sorted(modules.items())
+            ]
+            return CommandResponse(messages=[("system", "\n".join(lines))])
+
+        module_name = args[0]
+        module = modules.get(module_name)
+        if not module:
+            return CommandResponse(messages=[("system", f"Module '{module_name}' not found.")])
+
+        if len(args) == 1 or (len(args) >= 2 and args[1].lower() == "tools"):
+            lines = [f"{tool.name}\t{tool.description}" for tool in module.tools]
+            header = f"Tools in module '{module.name}' (v{module.version}):"
+            return CommandResponse(messages=[("system", "\n".join([header, *lines]))])
+
+        return CommandResponse(messages=[("system", "Usage: /modules list | /modules <module> tools")])
 
     @staticmethod
     def _handle_session(app: CLIApp, args: list[str]) -> CommandResponse:

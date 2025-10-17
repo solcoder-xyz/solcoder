@@ -6,6 +6,8 @@ Core CLI code lives under `src/solcoder/cli/` (Prompt Toolkit REPL, command rout
 ## Build, Test, and Development Commands
 Install dependencies once with `poetry install`. Launch the agent via `poetry run solcoder`, or dry-run the LLM request path using `poetry run solcoder --dry-run-llm`. The default provider hits OpenAI's Responses API with the `gpt-5-codex` model at `medium` reasoning effort; override via `--llm-model`, `--llm-reasoning`, or config, or adjust on the fly with `/settings model …` and `/settings reasoning …`. Run fast feedback loops with `poetry run pytest -m "not slow"` and enforce the full suite using `poetry run pytest`. Lint and format with `poetry run ruff check src tests` and `poetry run black src tests --check`. When editing knowledge entries, rebuild embeddings through `poetry run python scripts/build_kb_index.py`.
 
+Tooling is exposed through the registry (`src/solcoder/core/tool_registry.py`) and grouped into modules under `src/solcoder/core/tools/`. Use `/modules list` and `/modules <module> tools` in the CLI to inspect what the agent can call; direct user invocation of individual tools is intentionally disabled so orchestration stays behind the scenes.
+
 ## Coding Style & Naming Conventions
 Format Python with Black (88-character lines, 4-space indents) and satisfy Ruff before committing. Public APIs need full type hints, and modules should mirror command names (e.g., `deploy.py`, `wallet.py`). Follow `snake_case` for functions, `CamelCase` for classes, and `UPPER_SNAKE_CASE` for constants. Prefer brief, purposeful comments ahead of complex logic; keep documentation in Markdown under `docs/`.
 

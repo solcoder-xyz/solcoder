@@ -31,6 +31,7 @@ SolCoder is a CLI-first AI coding agent that scaffolds, deploys, and funds Solan
 10. Explore the built-in knowledge base: `poetry run solcoder` → `/kb search anchor macros` or ask “Explain the SPL token mint flow”. Rebuild embeddings with `poetry run python scripts/build_kb_index.py` after editing knowledge files.
 11. Manage your Solana wallet via `/wallet`: start with `/wallet status` (shows lock state + current balance), run `/wallet create` to generate a new keypair, `/wallet unlock` to decrypt it for spending, `/wallet phrase` to view the recovery mnemonic (requires passphrase), and `/wallet export [path]` to copy the secret—omit `path` to print JSON, or supply one to write an on-disk backup with 0600 permissions.
 12. Scaffold the reference counter workspace with `poetry run solcoder --template counter ./my-counter --program my_counter`. Inside the REPL you can run `/template counter ./my-counter` with optional `--program`, `--author`, and `--program-id` flags.
+13. Inspect available automation modules with `/modules list` and `/modules <module> tools` to see what the agent can orchestrate deterministically.
 
 ## Development Commands
 - `poetry run pytest` — execute unit, integration, and e2e suites.
