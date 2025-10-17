@@ -1,6 +1,7 @@
 # Task 2.6 — Live Status Bar & Logs
 
 - Milestone: [MILESTONE-2_CONVERSATIONAL_CORE](../milestones/MILESTONE-2_CONVERSATIONAL_CORE.md)
+- Status: In progress — started 2025-10-17 (prep for Milestone 2 kickoff)
 
 ## Objective
 Enhance the CLI UX with a Rich-powered status bar showing wallet, network, spend, and project state plus a `/logs` viewer for recent operations.

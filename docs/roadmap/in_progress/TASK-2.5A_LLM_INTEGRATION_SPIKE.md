@@ -1,6 +1,7 @@
 # Task 2.5a — LLM Integration Spike
 
 - Milestone: [MILESTONE-2_CONVERSATIONAL_CORE](../milestones/MILESTONE-2_CONVERSATIONAL_CORE.md)
+- Status: In progress — started 2025-10-17 (prep for Milestone 2 kickoff)
 
 ## Objective
 Connect SolCoder to a live LLM (GPT-4/5, Claude, etc.) early in development to validate API access, streaming, token budgeting, and error handling before layering higher-level tooling.

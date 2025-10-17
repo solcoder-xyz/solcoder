@@ -1,6 +1,7 @@
 # Task 2.5 — Agent Tool Registry Integration
 
 - Milestone: [MILESTONE-2_CONVERSATIONAL_CORE](../milestones/MILESTONE-2_CONVERSATIONAL_CORE.md)
+- Status: In progress — started 2025-10-17 (prep for Milestone 2 kickoff)
 
 ## Objective
 Expose deterministic Python callables for plan/code/review/deploy so the LLM orchestrator can choose tools, with fallbacks when the model is unavailable.

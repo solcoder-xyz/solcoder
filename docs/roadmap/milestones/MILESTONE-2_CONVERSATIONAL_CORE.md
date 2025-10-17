@@ -3,6 +3,9 @@
 ## Timeframe
 Day 1 (hours 12–18)
 
+## Status
+Kickoff underway as of 2025-10-17 with Tasks 2.5a, 2.5, and 2.6 in progress to stand up the live LLM loop and supporting registry/UI.
+
 ## Objective
 Light up the conversational experience by connecting to the live LLM, routing tool calls, and presenting responses in the CLI so subsequent features can build on a proven dialogue loop.
 
