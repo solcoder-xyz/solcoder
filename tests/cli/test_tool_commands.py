@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from solcoder.cli.app import CLIApp, StubLLM
+from solcoder.cli.app import CLIApp
+from solcoder.cli.stub_llm import StubLLM
 from solcoder.core.tool_registry import build_default_registry
 from solcoder.session import SessionManager
 from solcoder.solana import WalletManager

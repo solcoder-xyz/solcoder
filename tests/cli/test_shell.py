@@ -10,7 +10,10 @@ from typing import Any
 import pytest
 from rich.console import Console
 
-from solcoder.cli.app import AGENT_PLAN_ACK, CLIApp, StubLLM
+from solcoder.cli.agent_loop import AGENT_PLAN_ACK
+from solcoder.cli.app import CLIApp
+from solcoder.cli.stub_llm import StubLLM
+from solcoder.cli.commands import env as env_commands
 from solcoder.core.config import ConfigContext, ConfigManager, SolCoderConfig
 from solcoder.core.env_diag import DiagnosticResult
 from solcoder.core.llm import LLMResponse
@@ -661,7 +664,7 @@ def test_env_diag_command(
             remediation="Install Anchor.",
         ),
     ]
-    monkeypatch.setattr(cli_app_module, "collect_environment_diagnostics", lambda: fake_results)
+    monkeypatch.setattr(env_commands, "collect_environment_diagnostics", lambda: fake_results)
     app = CLIApp(
         console=console,
         session_manager=manager,

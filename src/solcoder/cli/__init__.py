@@ -8,18 +8,17 @@ import os
 import sys
 from importlib import metadata
 from pathlib import Path
-
-import typer
-import typer.rich_utils
-import click
-from typer.core import TyperOption
-
 from typing import Optional
 
+import click
+import typer
+import typer.rich_utils
+from typer.core import TyperOption
+
 from solcoder.core import (
+    DEFAULT_CONFIG_DIR,
     ConfigContext,
     ConfigManager,
-    DEFAULT_CONFIG_DIR,
     TemplateError,
     render_template,
 )
@@ -29,7 +28,8 @@ from solcoder.session import SessionLoadError, SessionManager
 from solcoder.session.manager import MAX_SESSIONS
 from solcoder.solana import SolanaRPCClient, WalletError, WalletManager
 
-from .app import CLIApp, _parse_template_tokens
+from .app import CLIApp
+from .template_utils import parse_template_tokens
 
 typer.rich_utils.USE_RICH = False
 
@@ -62,7 +62,7 @@ def _compat_print_options_panel(*, name, params, ctx, markup_mode, console) -> N
             return _inner
 
         param.make_metavar = _wrap_make_metavar()  # type: ignore[assignment]
-        setattr(param, "_solcoder_make_metavar_patched", True)
+        param._solcoder_make_metavar_patched = True
         patched.append(param)
 
     return _rich_print_options_panel(
@@ -143,7 +143,7 @@ def _parse_direct_launch_args(args: list[str]) -> tuple[bool, str | None, bool, 
 
 def _render_template_cli(template_name: str, tokens: list[str]) -> None:
     defaults = {"program_name": template_name, "author_pubkey": "CHANGEME"}
-    options, error = _parse_template_tokens(template_name, tokens, defaults)
+    options, error = parse_template_tokens(template_name, tokens, defaults)
     if error or options is None:
         typer.echo(f"❌ {error or 'Unable to render template.'}")
         raise typer.Exit(code=2)
@@ -219,7 +219,7 @@ def _candidate_session_roots() -> list[Path]:
     return candidates
 
 
-def _handle_dump_session(session_id: str, fmt: str, output: Optional[Path]) -> None:
+def _handle_dump_session(session_id: str, fmt: str, output: Path | None) -> None:
     fmt_normalized = fmt.lower()
     if fmt_normalized not in {"json", "text"}:
         typer.echo(f"❌ Unsupported dump format '{fmt}'. Use 'json' or 'text'.")
@@ -498,9 +498,9 @@ def _run_llm_dry_run(
 
 def _launch_shell(
     verbose: bool,
-    session: Optional[str],
+    session: str | None,
     new_session: bool,
-    config_file: Optional[Path],
+    config_file: Path | None,
     *,
     llm_provider: str | None = None,
     llm_base_url: str | None = None,
@@ -606,14 +606,14 @@ def _launch_shell(
 @app.command()
 def run(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),  # noqa: B008
-    session: Optional[str] = typer.Option(None, "--session", help="Resume the given session ID"),  # noqa: B008
+    session: str | None = typer.Option(None, "--session", help="Resume the given session ID"),  # noqa: B008
     new_session: bool = typer.Option(False, "--new-session", help="Start a fresh session"),  # noqa: B008
-    config: Optional[Path] = typer.Option(None, "--config", help="Use an alternate config file and skip project overrides"),  # noqa: B008
-    llm_provider: Optional[str] = typer.Option(None, "--llm-provider", help="Override the configured LLM provider"),  # noqa: B008
-    llm_base_url: Optional[str] = typer.Option(None, "--llm-base-url", help="Override the LLM base URL"),  # noqa: B008
-    llm_model: Optional[str] = typer.Option(None, "--llm-model", help="Override the LLM model"),  # noqa: B008
-    llm_reasoning: Optional[str] = typer.Option(None, "--llm-reasoning", help="Override the LLM reasoning effort (low|medium|high)"),  # noqa: B008
-    llm_api_key: Optional[str] = typer.Option(None, "--llm-api-key", help="Use this API key for the current run without persisting it"),  # noqa: B008
+    config: Path | None = typer.Option(None, "--config", help="Use an alternate config file and skip project overrides"),  # noqa: B008
+    llm_provider: str | None = typer.Option(None, "--llm-provider", help="Override the configured LLM provider"),  # noqa: B008
+    llm_base_url: str | None = typer.Option(None, "--llm-base-url", help="Override the LLM base URL"),  # noqa: B008
+    llm_model: str | None = typer.Option(None, "--llm-model", help="Override the LLM model"),  # noqa: B008
+    llm_reasoning: str | None = typer.Option(None, "--llm-reasoning", help="Override the LLM reasoning effort (low|medium|high)"),  # noqa: B008
+    llm_api_key: str | None = typer.Option(None, "--llm-api-key", help="Use this API key for the current run without persisting it"),  # noqa: B008
     offline_mode: bool = typer.Option(False, "--offline-mode", help="Force offline stubbed LLM responses", is_flag=True),  # noqa: B008
     dry_run_llm: bool = typer.Option(False, "--dry-run-llm", help="Send a single LLM request and exit"),  # noqa: B008
 ) -> None:
@@ -643,16 +643,16 @@ def version() -> None:
     typer.echo(f"SolCoder CLI version {pkg_version}")
 
 
-def _extract_dump_args(args: list[str]) -> tuple[Optional[str], str, Optional[Path], list[str]]:
-    session_id: Optional[str] = None
+def _extract_dump_args(args: list[str]) -> tuple[str | None, str, Path | None, list[str]]:
+    session_id: str | None = None
     dump_format = "json"
-    dump_output: Optional[Path] = None
+    dump_output: Path | None = None
     remaining: list[str] = []
     i = 0
     while i < len(args):
         arg = args[i]
         if arg.startswith("--dump-session"):
-            value: Optional[str] = None
+            value: str | None = None
             if arg == "--dump-session":
                 if i + 1 >= len(args):
                     typer.echo("❌ Option '--dump-session' requires a session id.")
