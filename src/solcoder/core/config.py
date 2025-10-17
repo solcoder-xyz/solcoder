@@ -64,7 +64,7 @@ class ConfigContext:
 
     config: SolCoderConfig
     llm_api_key: str
-    passphrase: str
+    passphrase: str | None
 
 
 class CredentialStore:
@@ -139,17 +139,36 @@ class ConfigManager:
         llm_reasoning: str | None = None,
         llm_api_key: str | None = None,
         passphrase: str | None = None,
+        offline_mode: bool = False,
     ) -> ConfigContext:
         """Ensure configuration and credentials exist; return decrypted context."""
 
-        if self.config_path.exists() and self.credentials_path.exists():
-            config = self._load_config()
-            api_key, used_passphrase = self._load_api_key(
-                config,
+        if offline_mode:
+            if self.config_path.exists():
+                config = self._load_config()
+            else:
+                config = SolCoderConfig()
+                self._save_config(config)
+
+            updates: dict[str, str] = {}
+            if llm_base_url and config.llm_base_url != llm_base_url:
+                updates["llm_base_url"] = llm_base_url
+            if llm_model and config.llm_model != llm_model:
+                updates["llm_model"] = llm_model
+            if llm_reasoning and config.llm_reasoning_effort != llm_reasoning:
+                updates["llm_reasoning_effort"] = llm_reasoning
+            if updates:
+                self.update_llm_preferences(**updates)
+                config = self._load_config()
+
+            return ConfigContext(
+                config=config,
+                llm_api_key=llm_api_key or "",
                 passphrase=passphrase,
-                interactive=interactive,
             )
 
+        if self.config_path.exists() and self.credentials_path.exists():
+            config = self._load_config()
             updates: dict[str, str] = {}
             if llm_base_url and config.llm_base_url != llm_base_url:
                 config.llm_base_url = llm_base_url
@@ -162,6 +181,19 @@ class ConfigManager:
                 updates["llm_reasoning_effort"] = llm_reasoning
             if updates:
                 self.update_llm_preferences(**updates)
+
+            if llm_api_key is not None:
+                return ConfigContext(
+                    config=config,
+                    llm_api_key=llm_api_key,
+                    passphrase=passphrase,
+                )
+
+            api_key, used_passphrase = self._load_api_key(
+                config,
+                passphrase=passphrase,
+                interactive=interactive,
+            )
             return ConfigContext(config=config, llm_api_key=api_key, passphrase=used_passphrase)
 
         return self._bootstrap_config(

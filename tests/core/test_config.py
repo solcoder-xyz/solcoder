@@ -6,7 +6,13 @@ import pytest
 import tomli_w
 import tomllib
 
-from solcoder.core.config import ConfigContext, ConfigManager, ConfigurationError, CONFIG_FILENAME
+from solcoder.core.config import (
+    CONFIG_FILENAME,
+    CREDENTIALS_FILENAME,
+    ConfigContext,
+    ConfigManager,
+    ConfigurationError,
+)
 
 
 def make_manager(tmp_path: Path, **kwargs: Any) -> ConfigManager:
@@ -55,6 +61,21 @@ def test_subsequent_load_requires_passphrase(tmp_path: Path) -> None:
     assert context.passphrase == "passphrase"
 
 
+def test_llm_api_key_override_skips_passphrase_prompt(tmp_path: Path) -> None:
+    manager = make_manager(tmp_path)
+    manager.ensure(
+        interactive=False,
+        llm_api_key="persisted",
+        passphrase="stored-pass",
+    )
+
+    manager2 = make_manager(tmp_path)
+    context = manager2.ensure(interactive=False, llm_api_key="override")
+
+    assert context.llm_api_key == "override"
+    assert context.passphrase is None
+
+
 def test_env_overrides_used_when_interactive_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SOLCODER_LLM_BASE_URL", "https://api.fake/v1")
     monkeypatch.setenv("SOLCODER_LLM_MODEL", "fake-model")
@@ -75,6 +96,21 @@ def test_env_overrides_used_when_interactive_false(tmp_path: Path, monkeypatch: 
     assert context2.llm_api_key == "env-secret"
     assert context2.passphrase == "env-pass"
     assert context2.config.llm_reasoning_effort == "high"
+
+
+def test_offline_mode_bootstrap_skips_credentials(tmp_path: Path) -> None:
+    manager = make_manager(tmp_path)
+    context = manager.ensure(
+        interactive=True,
+        llm_model="offline-model",
+        offline_mode=True,
+    )
+
+    assert context.llm_api_key == ""
+    assert context.passphrase is None
+    assert context.config.llm_model == "offline-model"
+    assert (tmp_path / CONFIG_FILENAME).exists()
+    assert not (tmp_path / CREDENTIALS_FILENAME).exists()
 
 
 def test_update_llm_preferences_persists_additional_fields(tmp_path: Path) -> None:

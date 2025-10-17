@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from solcoder.core.env_diag import collect_environment_diagnostics
 from solcoder.core.tools.base import Module, Tool, ToolResult
 
@@ -12,7 +14,7 @@ def _diagnostics_handler(_payload: dict[str, str]) -> ToolResult:
         detail = item.version or item.details or "status unknown"
         lines.append(f"- {item.name}: {status} ({detail})")
     summary = f"{sum(r.found for r in results)} of {len(results)} tools detected"
-    data = [result.model_dump() for result in results]  # type: ignore[call-arg]
+    data = [asdict(result) for result in results]
     return ToolResult(content="\n".join(lines), summary=summary, data=data)
 
 

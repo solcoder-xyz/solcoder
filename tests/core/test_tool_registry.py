@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import pytest
-
+from dataclasses import asdict
 from pathlib import Path
+
+import pytest
 
 from solcoder.core.tool_registry import (
     Tool,
@@ -13,6 +14,7 @@ from solcoder.core.tool_registry import (
     ToolResult,
     build_default_registry,
 )
+from solcoder.core.env_diag import DiagnosticResult
 
 
 def test_register_and_invoke_tool() -> None:
@@ -84,3 +86,26 @@ def test_command_run_executes_shell(tmp_path: Path) -> None:
     )
     assert "hello" in result.content
     assert result.data["returncode"] == 0
+
+
+def test_diagnostics_tool_serializes_dataclass(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = build_default_registry()
+    fake_results = [
+        DiagnosticResult(
+            name="Tool A",
+            status="ok",
+            found=True,
+            version="1.2.3",
+            remediation=None,
+        )
+    ]
+
+    monkeypatch.setattr(
+        "solcoder.core.tools.diagnostics.collect_environment_diagnostics",
+        lambda: fake_results,
+    )
+
+    result = registry.invoke("collect_env_diagnostics")
+
+    assert result.summary == "1 of 1 tools detected"
+    assert result.data == [asdict(fake_results[0])]

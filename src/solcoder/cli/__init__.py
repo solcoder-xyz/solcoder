@@ -310,11 +310,20 @@ def _prompt_unlock(wallet_manager: WalletManager) -> None:
 def _bootstrap_wallet(
     wallet_manager: WalletManager,
     rpc_client: SolanaRPCClient | None,
-    master_passphrase: str,
+    master_passphrase: str | None,
 ) -> None:
+    def _ensure_passphrase(prompt: str = "Enter your SolCoder passphrase") -> str:
+        nonlocal master_passphrase
+        while not master_passphrase:
+            master_passphrase = typer.prompt(prompt, hide_input=True)
+        return master_passphrase
+
     if not wallet_manager.wallet_exists():
         typer.echo("\n🔐 No SolCoder wallet found. Let's create or restore one before continuing.")
-        typer.echo("We'll reuse the passphrase you just set for SolCoder to keep everything in sync.")
+        if master_passphrase:
+            typer.echo("We'll reuse the passphrase you just set for SolCoder to keep everything in sync.")
+        else:
+            typer.echo("You'll secure the wallet with your SolCoder passphrase.")
         while True:
             choice = (
                 typer.prompt("Create new wallet or restore existing? [c/r]", default="c")
@@ -323,7 +332,7 @@ def _bootstrap_wallet(
             )
             if choice in {"c", "create"}:
                 typer.echo("\nWe'll generate a recovery phrase. Store it securely—anyone with the phrase controls your funds.")
-                status, mnemonic = wallet_manager.create_wallet(master_passphrase, force=True)
+                status, mnemonic = wallet_manager.create_wallet(_ensure_passphrase(), force=True)
                 typer.echo("✅ Wallet created and unlocked.")
                 _show_balance(rpc_client, status.public_key)
                 typer.echo("\n📝 Recovery phrase (write it down, keep it offline):")
@@ -345,13 +354,17 @@ def _bootstrap_wallet(
                 else:
                     secret = typer.prompt("Enter recovery phrase or JSON/base58 secret")
                 try:
-                    status, mnemonic = wallet_manager.restore_wallet(secret, master_passphrase, overwrite=True)
+                    status, mnemonic = wallet_manager.restore_wallet(
+                        secret,
+                        _ensure_passphrase("Enter the SolCoder passphrase to encrypt your wallet"),
+                        overwrite=True,
+                    )
                 except WalletError as exc:
                     typer.echo(f"❌ {exc}")
                     continue
                 typer.echo("✅ Wallet restored.")
                 try:
-                    wallet_manager.unlock_wallet(master_passphrase)
+                    wallet_manager.unlock_wallet(_ensure_passphrase())
                     typer.echo("🔓 Wallet unlocked.")
                 except WalletError:
                     typer.echo("⚠️  Unable to unlock wallet with provided passphrase; it will remain locked.")
@@ -366,11 +379,15 @@ def _bootstrap_wallet(
 
     status = wallet_manager.status()
     if not status.is_unlocked:
-        try:
-            wallet_manager.unlock_wallet(master_passphrase)
-            typer.echo("🔓 Wallet unlocked with your SolCoder passphrase.")
-            _show_balance(rpc_client, wallet_manager.status().public_key)
-        except WalletError:
+        if master_passphrase:
+            try:
+                wallet_manager.unlock_wallet(master_passphrase)
+                typer.echo("🔓 Wallet unlocked with your SolCoder passphrase.")
+                _show_balance(rpc_client, wallet_manager.status().public_key)
+            except WalletError:
+                if typer.confirm("Stored passphrase didn't unlock the wallet. Enter it manually?", default=True):
+                    _prompt_unlock(wallet_manager)
+        else:
             if typer.confirm("Stored passphrase didn't unlock the wallet. Enter it manually?", default=True):
                 _prompt_unlock(wallet_manager)
 
@@ -439,6 +456,7 @@ def _run_llm_dry_run(
         llm_model=model,
         llm_reasoning=reasoning,
         llm_api_key=api_key,
+        offline_mode=offline_mode,
     )
     llm_client = _prepare_llm_client(
         config_manager,
@@ -533,6 +551,7 @@ def _launch_shell(
         llm_model=llm_model,
         llm_reasoning=llm_reasoning,
         llm_api_key=llm_api_key,
+        offline_mode=offline_mode,
     )
 
     llm_client: LLMClient | None = None
