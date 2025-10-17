@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from solcoder.core.tools import DEFAULT_MODULE_FACTORIES
+from solcoder.core.tools import DEFAULT_TOOLKIT_FACTORIES
 from solcoder.core.tools.base import (
-    Module,
-    ModuleAlreadyRegisteredError,
     Tool,
     ToolAlreadyRegisteredError,
     ToolInvocationError,
+    Toolkit,
+    ToolkitAlreadyRegisteredError,
     ToolNotFoundError,
     ToolRegistryError,
     ToolResult,
@@ -18,21 +18,28 @@ from solcoder.core.tools.base import (
 
 
 class ToolRegistry:
-    """Stores tool handlers grouped by modules."""
+    """Stores tool handlers grouped by toolkits."""
 
-    def __init__(self, modules: list[Module] | None = None) -> None:
+    def __init__(self, toolkits: list[Toolkit] | None = None) -> None:
         self._tools: dict[str, Tool] = {}
-        self._modules: dict[str, Module] = {}
-        if modules:
-            for module in modules:
-                self.add_module(module)
+        self._toolkits: dict[str, Toolkit] = {}
+        if toolkits:
+            for toolkit in toolkits:
+                self.add_toolkit(toolkit)
 
-    def add_module(self, module: Module, *, overwrite: bool = False) -> None:
-        if not overwrite and module.name in self._modules:
-            raise ModuleAlreadyRegisteredError(f"Module '{module.name}' already registered")
-        self._modules[module.name] = module
-        for tool in module.tools:
-            self.register(tool, overwrite=overwrite)
+    def add_toolkit(self, toolkit: Toolkit, *, overwrite: bool = False) -> None:
+        if not overwrite and toolkit.name in self._toolkits:
+            raise ToolkitAlreadyRegisteredError(f"Toolkit '{toolkit.name}' already registered")
+        registered: list[str] = []
+        try:
+            for tool in toolkit.tools:
+                self.register(tool, overwrite=overwrite)
+                registered.append(tool.name)
+        except Exception:
+            for tool_name in registered:
+                self.unregister(tool_name)
+            raise
+        self._toolkits[toolkit.name] = toolkit
 
     def register(self, tool: Tool, *, overwrite: bool = False) -> None:
         if not overwrite and tool.name in self._tools:
@@ -51,8 +58,8 @@ class ToolRegistry:
     def available_tools(self) -> dict[str, Tool]:
         return dict(self._tools)
 
-    def available_modules(self) -> dict[str, Module]:
-        return dict(self._modules)
+    def available_toolkits(self) -> dict[str, Toolkit]:
+        return dict(self._toolkits)
 
     def invoke(self, name: str, payload: dict[str, Any] | None = None) -> ToolResult:
         tool = self.get(name)
@@ -65,9 +72,9 @@ class ToolRegistry:
 
 
 def build_default_registry() -> ToolRegistry:
-    """Return a registry pre-populated with the built-in tools."""
-    modules = [factory() for factory in DEFAULT_MODULE_FACTORIES]
-    return ToolRegistry(modules=modules)
+    """Return a registry pre-populated with the built-in toolkits."""
+    toolkits = [factory() for factory in DEFAULT_TOOLKIT_FACTORIES]
+    return ToolRegistry(toolkits=toolkits)
 
 
 __all__ = [
@@ -78,7 +85,7 @@ __all__ = [
     "ToolNotFoundError",
     "ToolAlreadyRegisteredError",
     "ToolInvocationError",
-    "Module",
-    "ModuleAlreadyRegisteredError",
+    "Toolkit",
+    "ToolkitAlreadyRegisteredError",
     "build_default_registry",
 ]

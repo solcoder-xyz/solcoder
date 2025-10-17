@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 
 class ToolRegistryError(RuntimeError):
@@ -22,8 +23,8 @@ class ToolInvocationError(ToolRegistryError):
     """Raised when a tool handler fails."""
 
 
-class ModuleAlreadyRegisteredError(ToolRegistryError):
-    """Raised when attempting to register a module twice."""
+class ToolkitAlreadyRegisteredError(ToolRegistryError):
+    """Raised when attempting to register a toolkit twice."""
 
 
 @dataclass(slots=True)
@@ -47,7 +48,7 @@ class Tool:
 
 
 @dataclass(slots=True)
-class Module:
+class Toolkit:
     """Groups related tools together."""
 
     name: str

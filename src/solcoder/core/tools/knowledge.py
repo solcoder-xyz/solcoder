@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from solcoder.core.tools.base import Module, Tool, ToolResult
+from solcoder.core.tools.base import Tool, Toolkit, ToolResult
 
 
 def _knowledge_handler(payload: dict[str, str]) -> ToolResult:
@@ -12,7 +12,7 @@ def _knowledge_handler(payload: dict[str, str]) -> ToolResult:
     return ToolResult(content=content, summary=f"Knowledge search stub for '{query}'")
 
 
-def knowledge_module() -> Module:
+def knowledge_toolkit() -> Toolkit:
     tool = Tool(
         name="lookup_knowledge",
         description="Placeholder for knowledge base retrieval (returns stub response).",
@@ -26,7 +26,7 @@ def knowledge_module() -> Module:
         output_schema={"type": "object"},
         handler=_knowledge_handler,
     )
-    return Module(
+    return Toolkit(
         name="solcoder.knowledge",
         version="0.1.0",
         description="Knowledge retrieval stubs awaiting backend integration.",

@@ -17,7 +17,14 @@ from .agent import (
 )
 from .env_diag import DiagnosticResult, ToolRequirement, collect_environment_diagnostics
 from .templates import RenderOptions, TemplateError, TemplateExistsError, TemplateNotFoundError, available_templates, render_template
-from .tool_registry import ToolRegistry, ToolRegistryError, ToolResult, build_default_registry
+from .tool_registry import (
+    ToolRegistry,
+    ToolRegistryError,
+    ToolResult,
+    Toolkit,
+    ToolkitAlreadyRegisteredError,
+    build_default_registry,
+)
 
 __all__ = [
     "AgentDirective",
@@ -43,5 +50,7 @@ __all__ = [
     "ToolRegistry",
     "ToolRegistryError",
     "ToolResult",
+    "Toolkit",
+    "ToolkitAlreadyRegisteredError",
     "build_default_registry",
 ]

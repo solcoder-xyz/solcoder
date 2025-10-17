@@ -7,7 +7,7 @@
 Expose deterministic Python callables for plan/code/review/deploy so the LLM orchestrator can choose tools, with fallbacks when the model is unavailable.
 
 ## Deliverables
-- Tool registry module registering functions for planning, coding, reviewing, deploying, diagnostics, and knowledge retrieval/command execution.
+- Tool registry toolkit registering functions for planning, coding, reviewing, deploying, diagnostics, and knowledge retrieval/command execution.
 - LLM client wrapper handling timeouts, retries, and fallback text responses.
 - `/plan`, `/code`, `/review` commands invoking registry functions directly (bypassing LLM) for deterministic runs.
 - Tests validating tool registration, fallback execution, and CLI dispatch.
@@ -34,6 +34,6 @@ Expose deterministic Python callables for plan/code/review/deploy so the LLM orc
 - CLI engineer and Tech Lead (LLM orchestration), QA validates fallback behavior.
 
 ## Outcome
-- Tool registry shipped with modules for planning, coding, reviewing, deployment, diagnostics, knowledge stubs, and shell command execution.
+- Tool registry shipped with toolkits for planning, coding, reviewing, deployment, diagnostics, knowledge stubs, and shell command execution.
 - CLI commands and LLM orchestration now honor the registry, including offline fallbacks and command invocations.
 - Regression tests in `tests/core/test_tool_registry.py` and CLI coverage ensure continued stability.

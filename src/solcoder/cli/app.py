@@ -329,7 +329,7 @@ class CLIApp:
             SlashCommand("template", CLIApp._handle_template, "Template scaffolding commands"),
         )
         self.command_router.register(
-            SlashCommand("modules", CLIApp._handle_modules, "List tool modules and tools"),
+            SlashCommand("toolkits", CLIApp._handle_toolkits, "List toolkits and tools"),
         )
 
     # ------------------------------------------------------------------
@@ -1006,28 +1006,28 @@ class CLIApp:
         )
 
     @staticmethod
-    def _handle_modules(app: CLIApp, args: list[str]) -> CommandResponse:
-        modules = app.tool_registry.available_modules()
+    def _handle_toolkits(app: CLIApp, args: list[str]) -> CommandResponse:
+        toolkits = app.tool_registry.available_toolkits()
         if not args or args[0].lower() == "list":
-            if not modules:
-                return CommandResponse(messages=[("system", "No modules registered.")])
+            if not toolkits:
+                return CommandResponse(messages=[("system", "No toolkits registered.")])
             lines = [
-                f"{name}\t{module.description} (v{module.version})"
-                for name, module in sorted(modules.items())
+                f"{name}\t{toolkit.description} (v{toolkit.version})"
+                for name, toolkit in sorted(toolkits.items())
             ]
             return CommandResponse(messages=[("system", "\n".join(lines))])
 
-        module_name = args[0]
-        module = modules.get(module_name)
-        if not module:
-            return CommandResponse(messages=[("system", f"Module '{module_name}' not found.")])
+        toolkit_name = args[0]
+        toolkit = toolkits.get(toolkit_name)
+        if not toolkit:
+            return CommandResponse(messages=[("system", f"Toolkit '{toolkit_name}' not found.")])
 
         if len(args) == 1 or (len(args) >= 2 and args[1].lower() == "tools"):
-            lines = [f"{tool.name}\t{tool.description}" for tool in module.tools]
-            header = f"Tools in module '{module.name}' (v{module.version}):"
+            lines = [f"{tool.name}\t{tool.description}" for tool in toolkit.tools]
+            header = f"Tools in toolkit '{toolkit.name}' (v{toolkit.version}):"
             return CommandResponse(messages=[("system", "\n".join([header, *lines]))])
 
-        return CommandResponse(messages=[("system", "Usage: /modules list | /modules <module> tools")])
+        return CommandResponse(messages=[("system", "Usage: /toolkits list | /toolkits <toolkit> tools")])
 
     @staticmethod
     def _handle_session(app: CLIApp, args: list[str]) -> CommandResponse:

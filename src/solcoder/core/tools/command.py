@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from solcoder.core.tools.base import Module, Tool, ToolInvocationError, ToolResult
+from solcoder.core.tools.base import Tool, ToolInvocationError, Toolkit, ToolResult
 
 
 def _command_handler(payload: dict[str, Any]) -> ToolResult:
@@ -21,9 +21,9 @@ def _command_handler(payload: dict[str, Any]) -> ToolResult:
         raise ToolInvocationError("Timeout must be numeric if provided.") from None
 
     try:
-        completed = subprocess.run(  # noqa: S603,S607 - controlled inputs
+        completed = subprocess.run(  # noqa: S602,S603,S607 - controlled inputs
             command,
-            shell=True,
+            shell=True,  # noqa: S602
             check=False,
             capture_output=True,
             text=True,
@@ -61,7 +61,7 @@ def _command_handler(payload: dict[str, Any]) -> ToolResult:
     )
 
 
-def command_module() -> Module:
+def command_toolkit() -> Toolkit:
     tool = Tool(
         name="execute_shell_command",
         description="Run a shell command within the SolCoder workspace and capture output.",
@@ -86,7 +86,7 @@ def command_module() -> Module:
         output_schema={"type": "object"},
         handler=_command_handler,
     )
-    return Module(
+    return Toolkit(
         name="solcoder.command",
         version="1.0.0",
         description="Command execution utilities for SolCoder agents.",

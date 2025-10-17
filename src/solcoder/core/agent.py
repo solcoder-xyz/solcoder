@@ -64,11 +64,12 @@ class ToolManifestTool:
     name: str
     description: str
     input_schema: dict[str, Any]
+    required: list[str]
 
 
 @dataclass(slots=True)
-class ToolManifestModule:
-    """Manifest entry describing a module and its tools."""
+class ToolManifestToolkit:
+    """Manifest entry describing a toolkit and its tools."""
 
     name: str
     description: str
@@ -76,45 +77,50 @@ class ToolManifestModule:
     tools: list[ToolManifestTool]
 
 
-def build_tool_manifest(registry: ToolRegistry) -> list[ToolManifestModule]:
+def build_tool_manifest(registry: ToolRegistry) -> list[ToolManifestToolkit]:
     """Serialise the registry to a manifest suitable for LLM prompts."""
-    manifest: list[ToolManifestModule] = []
-    for module in sorted(registry.available_modules().values(), key=lambda mod: mod.name):
-        tools = [
-            ToolManifestTool(
-                name=tool.name,
-                description=tool.description,
-                input_schema=tool.input_schema,
+    manifest: list[ToolManifestToolkit] = []
+    for toolkit in sorted(registry.available_toolkits().values(), key=lambda tk: tk.name):
+        tools = []
+        for tool in toolkit.tools:
+            required_fields = tool.input_schema.get("required")
+            required_list = list(required_fields) if isinstance(required_fields, list) else []
+            tools.append(
+                ToolManifestTool(
+                    name=tool.name,
+                    description=tool.description,
+                    input_schema=tool.input_schema,
+                    required=required_list,
+                )
             )
-            for tool in module.tools
-        ]
         manifest.append(
-            ToolManifestModule(
-                name=module.name,
-                description=module.description,
-                version=module.version,
+            ToolManifestToolkit(
+                name=toolkit.name,
+                description=toolkit.description,
+                version=toolkit.version,
                 tools=tools,
             )
         )
     return manifest
 
 
-def manifest_to_prompt_section(modules: Iterable[ToolManifestModule]) -> str:
+def manifest_to_prompt_section(toolkits: Iterable[ToolManifestToolkit]) -> str:
     """Render the manifest as compact JSON for the system prompt."""
     serialisable: list[dict[str, Any]] = []
-    for module in modules:
+    for toolkit in toolkits:
         serialisable.append(
             {
-                "module": module.name,
-                "version": module.version,
-                "description": module.description,
+                "toolkit": toolkit.name,
+                "version": toolkit.version,
+                "description": toolkit.description,
                 "tools": [
                     {
                         "name": tool.name,
                         "description": tool.description,
                         "input_schema": tool.input_schema,
+                        "required": tool.required,
                     }
-                    for tool in module.tools
+                    for tool in toolkit.tools
                 ],
             }
         )
@@ -139,7 +145,7 @@ __all__ = [
     "AgentToolCall",
     "AgentToolResult",
     "AgentMessageError",
-    "ToolManifestModule",
+    "ToolManifestToolkit",
     "ToolManifestTool",
     "build_tool_manifest",
     "manifest_to_prompt_section",

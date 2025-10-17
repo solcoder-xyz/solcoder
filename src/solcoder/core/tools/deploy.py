@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from solcoder.core.tools.base import Module, Tool, ToolResult
+from solcoder.core.tools.base import Tool, Toolkit, ToolResult
 
 
 def _deploy_handler(payload: dict[str, str]) -> ToolResult:
@@ -15,7 +15,7 @@ def _deploy_handler(payload: dict[str, str]) -> ToolResult:
     return ToolResult(content="\n".join(content), summary=f"Deployment checklist for {environment}")
 
 
-def deploy_module() -> Module:
+def deploy_toolkit() -> Toolkit:
     tool = Tool(
         name="create_deploy_checklist",
         description="Provide a deployment checklist for the requested environment.",
@@ -27,11 +27,12 @@ def deploy_module() -> Module:
                     "description": "Target network such as devnet, testnet, or mainnet.",
                 }
             },
+            "required": [],
         },
         output_schema={"type": "object"},
         handler=_deploy_handler,
     )
-    return Module(
+    return Toolkit(
         name="solcoder.deploy",
         version="1.0.0",
         description="Deployment preparation utilities for SolCoder workflows.",

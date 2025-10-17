@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from solcoder.core.tools.base import Module, Tool, ToolResult
+from solcoder.core.tools.base import Tool, Toolkit, ToolResult
 
 
 def _code_handler(payload: dict[str, Any]) -> ToolResult:
@@ -17,7 +17,7 @@ def _code_handler(payload: dict[str, Any]) -> ToolResult:
     return ToolResult(content="\n".join(message_lines), summary=f"Prepared coding stub for {objective}")
 
 
-def code_module() -> Module:
+def code_toolkit() -> Toolkit:
     tool = Tool(
         name="prepare_code_steps",
         description="Outline coding actions or scaffolds for a requested objective.",
@@ -38,7 +38,7 @@ def code_module() -> Module:
         output_schema={"type": "object"},
         handler=_code_handler,
     )
-    return Module(
+    return Toolkit(
         name="solcoder.coding",
         version="1.0.0",
         description="Code authoring helper utilities for SolCoder agents.",

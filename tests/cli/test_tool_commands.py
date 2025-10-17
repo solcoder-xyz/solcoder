@@ -6,11 +6,10 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
+from solcoder.cli.app import CLIApp, StubLLM
 from solcoder.core.tool_registry import build_default_registry
 from solcoder.session import SessionManager
 from solcoder.solana import WalletManager
-
-from solcoder.cli.app import CLIApp, StubLLM
 
 
 @pytest.fixture()
@@ -25,7 +24,7 @@ def session_bundle(tmp_path: Path) -> tuple[SessionManager, object, WalletManage
     return manager, context, WalletManager(keys_dir=tmp_path / "keys")
 
 
-def test_modules_list_shows_registered_modules(
+def test_toolkits_list_shows_registered_toolkits(
     console: Console,
     session_bundle: tuple[SessionManager, object, WalletManager],
 ) -> None:
@@ -39,13 +38,13 @@ def test_modules_list_shows_registered_modules(
         wallet_manager=wallet_manager,
     )
 
-    response = app.handle_line("/modules list")
+    response = app.handle_line("/toolkits list")
 
     assert any("solcoder.planning" in message for _, message in response.messages)
     assert any("solcoder.command" in message for _, message in response.messages)
 
 
-def test_modules_tools_lists_tools_for_module(
+def test_toolkits_tools_lists_tools_for_toolkit(
     console: Console,
     session_bundle: tuple[SessionManager, object, WalletManager],
 ) -> None:
@@ -59,6 +58,6 @@ def test_modules_tools_lists_tools_for_module(
         wallet_manager=wallet_manager,
     )
 
-    response = app.handle_line("/modules solcoder.planning tools")
+    response = app.handle_line("/toolkits solcoder.planning tools")
 
     assert any("generate_plan" in message for _, message in response.messages)

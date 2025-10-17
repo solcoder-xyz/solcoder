@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from solcoder.core.tools.base import Module, Tool, ToolResult
+from solcoder.core.tools.base import Tool, Toolkit, ToolResult
 
 
 def _plan_handler(payload: dict[str, str]) -> ToolResult:
@@ -16,7 +16,7 @@ def _plan_handler(payload: dict[str, str]) -> ToolResult:
     return ToolResult(content="\n".join(content), summary=f"Plan drafted for: {goal}")
 
 
-def plan_module() -> Module:
+def plan_toolkit() -> Toolkit:
     tool = Tool(
         name="generate_plan",
         description="Produce a structured project plan from a natural language goal.",
@@ -30,7 +30,7 @@ def plan_module() -> Module:
         output_schema={"type": "object"},
         handler=_plan_handler,
     )
-    return Module(
+    return Toolkit(
         name="solcoder.planning",
         version="1.0.0",
         description="Planning utilities for SolCoder orchestration workflows.",

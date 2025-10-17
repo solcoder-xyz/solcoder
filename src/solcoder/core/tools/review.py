@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from solcoder.core.tools.base import Module, Tool, ToolResult
+from solcoder.core.tools.base import Tool, Toolkit, ToolResult
 
 
 def _review_handler(payload: dict[str, str]) -> ToolResult:
@@ -16,7 +16,7 @@ def _review_handler(payload: dict[str, str]) -> ToolResult:
     return ToolResult(content="\n".join(content), summary=f"Generated review checklist for {target}")
 
 
-def review_module() -> Module:
+def review_toolkit() -> Toolkit:
     tool = Tool(
         name="generate_review_checklist",
         description="Generate a review checklist for the specified code change.",
@@ -30,7 +30,7 @@ def review_module() -> Module:
         output_schema={"type": "object"},
         handler=_review_handler,
     )
-    return Module(
+    return Toolkit(
         name="solcoder.review",
         version="1.0.0",
         description="Code review guidance utilities for SolCoder agents.",

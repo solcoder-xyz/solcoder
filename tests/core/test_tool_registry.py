@@ -5,16 +5,18 @@ from pathlib import Path
 
 import pytest
 
+from solcoder.core.agent import build_tool_manifest
+from solcoder.core.env_diag import DiagnosticResult
 from solcoder.core.tool_registry import (
     Tool,
     ToolAlreadyRegisteredError,
+    Toolkit,
     ToolNotFoundError,
     ToolRegistry,
     ToolRegistryError,
     ToolResult,
     build_default_registry,
 )
-from solcoder.core.env_diag import DiagnosticResult
 
 
 def test_register_and_invoke_tool() -> None:
@@ -73,9 +75,9 @@ def test_default_registry_contains_expected_tools() -> None:
     assert "lookup_knowledge" in tool_names
     assert "execute_shell_command" in tool_names
 
-    modules = registry.available_modules()
-    assert "solcoder.planning" in modules
-    assert modules["solcoder.planning"].tools[0].name == "generate_plan"
+    toolkits = registry.available_toolkits()
+    assert "solcoder.planning" in toolkits
+    assert toolkits["solcoder.planning"].tools[0].name == "generate_plan"
 
 
 def test_command_run_executes_shell(tmp_path: Path) -> None:
@@ -109,3 +111,38 @@ def test_diagnostics_tool_serializes_dataclass(monkeypatch: pytest.MonkeyPatch) 
 
     assert result.summary == "1 of 1 tools detected"
     assert result.data == [asdict(fake_results[0])]
+
+
+def test_module_registration_rolls_back_on_tool_conflict() -> None:
+    registry = build_default_registry()
+    duplicate_tool = Tool(
+        name="generate_plan",  # already present in default registry
+        description="conflict",
+        input_schema={},
+        output_schema={},
+        handler=lambda _: ToolResult(content="noop"),
+    )
+    conflicting_toolkit = Toolkit(
+        name="custom.module",
+        version="1.0.0",
+        description="Conflicting tools",
+        tools=[duplicate_tool],
+    )
+
+    with pytest.raises(ToolAlreadyRegisteredError):
+        registry.add_toolkit(conflicting_toolkit)
+
+    toolkits = registry.available_toolkits()
+    assert "custom.module" not in toolkits
+    assert registry.get("generate_plan")  # original tool still available
+
+
+def test_manifest_contains_required_fields() -> None:
+    registry = build_default_registry()
+    manifest = build_tool_manifest(registry)
+
+    planning = next(tk for tk in manifest if tk.name == "solcoder.planning")
+    assert planning.tools[0].required == ["goal"]
+
+    diagnostics = next(tk for tk in manifest if tk.name == "solcoder.diagnostics")
+    assert diagnostics.tools[0].required == []
