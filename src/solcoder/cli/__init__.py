@@ -1,0 +1,526 @@
+"""CLI package for SolCoder."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import sys
+from importlib import metadata
+from pathlib import Path
+
+import typer
+import typer.rich_utils
+import click
+from typer.core import TyperOption
+
+from typing import Optional
+
+from solcoder.core import ConfigManager, DEFAULT_CONFIG_DIR, TemplateError, render_template
+from solcoder.core.config import CONFIG_FILENAME
+from solcoder.session import SessionLoadError, SessionManager
+from solcoder.session.manager import MAX_SESSIONS
+from solcoder.solana import SolanaRPCClient, WalletError, WalletManager
+
+from .app import CLIApp, _parse_template_tokens
+
+typer.rich_utils.USE_RICH = False
+
+_original_make_metavar = TyperOption.make_metavar
+if _original_make_metavar.__code__.co_argcount == 2:  # Click>=8.3 signature requires ctx
+    def _patched_make_metavar(self: TyperOption, ctx: click.Context | None = None) -> str:
+        if ctx is None:
+            ctx = click.Context(click.Command(name=self.name or "option"))
+        return _original_make_metavar(self, ctx)
+
+    TyperOption.make_metavar = _patched_make_metavar  # type: ignore[assignment]
+
+_rich_print_options_panel = typer.rich_utils._print_options_panel
+
+
+def _compat_print_options_panel(*, name, params, ctx, markup_mode, console) -> None:
+    patched: list[click.Parameter] = []
+    for param in params:
+        if getattr(param, "_solcoder_make_metavar_patched", False):
+            continue
+        original = param.make_metavar
+
+        def _wrap_make_metavar(orig=original) -> callable:
+            def _inner() -> str:
+                try:
+                    return orig()
+                except TypeError:
+                    return orig(ctx)
+
+            return _inner
+
+        param.make_metavar = _wrap_make_metavar()  # type: ignore[assignment]
+        setattr(param, "_solcoder_make_metavar_patched", True)
+        patched.append(param)
+
+    return _rich_print_options_panel(
+        name=name,
+        params=params,
+        ctx=ctx,
+        markup_mode=markup_mode,
+        console=console,
+    )
+
+
+typer.rich_utils._print_options_panel = _compat_print_options_panel  # type: ignore[assignment]
+
+
+app = typer.Typer(invoke_without_command=True, help="SolCoder CLI agent", no_args_is_help=False)
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"", "0", "false", "no"}
+
+
+def _parse_direct_launch_args(args: list[str]) -> tuple[bool, str | None, bool, Path | None] | str | None:
+    verbose = _env_flag("SOLCODER_DEBUG", default=False)
+    session: str | None = None
+    new_session = False
+    config_path: Path | None = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in {"--help", "-h"}:
+            return None
+        if arg in {"--version", "-V"}:
+            return "version"
+        if arg in {"--verbose", "-v"}:
+            verbose = True
+            i += 1
+            continue
+        if arg == "--new-session":
+            new_session = True
+            i += 1
+            continue
+        if arg.startswith("--new-session="):
+            value = arg.split("=", 1)[1]
+            new_session = value.strip().lower() not in {"", "0", "false", "no"}
+            i += 1
+            continue
+        if arg == "--session":
+            if i + 1 >= len(args):
+                typer.echo("❌ Option '--session' requires a session id.")
+                raise typer.Exit(code=2)
+            session = args[i + 1]
+            i += 2
+            continue
+        if arg.startswith("--session="):
+            session = arg.split("=", 1)[1]
+            i += 1
+            continue
+        if arg == "--config":
+            if i + 1 >= len(args):
+                typer.echo("❌ Option '--config' requires a file path.")
+                raise typer.Exit(code=2)
+            config_path = Path(args[i + 1]).expanduser()
+            i += 2
+            continue
+        if arg.startswith("--config="):
+            config_path = Path(arg.split("=", 1)[1]).expanduser()
+            i += 1
+            continue
+        if arg.startswith("-"):
+            return None
+        return None
+    return verbose, session, new_session, config_path
+
+
+def _render_template_cli(template_name: str, tokens: list[str]) -> None:
+    defaults = {"program_name": template_name, "author_pubkey": "CHANGEME"}
+    options, error = _parse_template_tokens(template_name, tokens, defaults)
+    if error or options is None:
+        typer.echo(f"❌ {error or 'Unable to render template.'}")
+        raise typer.Exit(code=2)
+    try:
+        output = render_template(options)
+    except TemplateError as exc:
+        typer.echo(f"❌ {exc}")
+        raise typer.Exit(code=1)
+    typer.echo(f"✅ Template '{template_name}' rendered to {output}")
+
+
+def _configure_logging(verbose: bool, log_dir: Path | None) -> None:
+    root_logger = logging.getLogger()
+    if verbose:
+        if not root_logger.handlers:
+            logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+        root_logger.setLevel(logging.DEBUG)
+    else:
+        if root_logger.handlers:
+            root_logger.setLevel(logging.WARNING)
+        else:
+            logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    if verbose and log_dir is not None:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(log_dir / "solcoder.log", encoding="utf-8")
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        logging.getLogger().addHandler(handler)
+
+
+def _format_session_text(export_data: dict[str, object]) -> str:
+    metadata = export_data.get("metadata", {})
+    transcript = export_data.get("transcript", [])
+    lines = ["Session Export", "=============="]
+    if isinstance(metadata, dict):
+        for key in ("session_id", "created_at", "updated_at", "active_project", "wallet_status", "wallet_balance", "spend_amount"):
+            value = metadata.get(key)
+            if value is not None:
+                lines.append(f"{key.replace('_', ' ').title()}: {value}")
+    lines.append("")
+    lines.append("Transcript (most recent first):")
+    if isinstance(transcript, list) and transcript:
+        for entry in transcript:
+            if isinstance(entry, dict):
+                role = entry.get("role", "?")
+                message = entry.get("message", "")
+                lines.append(f"[{role}] {message}")
+            else:
+                lines.append(str(entry))
+    else:
+        lines.append("(no transcript available)")
+    return "\n".join(lines)
+
+
+def _candidate_session_roots() -> list[Path]:
+    """Return session directories to search, prioritizing project scope."""
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+
+    def add(path: Path) -> None:
+        expanded = path.expanduser()
+        resolved = expanded.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            candidates.append(resolved)
+
+    add(Path.cwd() / ".solcoder" / "sessions")
+    env_home = os.environ.get("SOLCODER_HOME")
+    if env_home:
+        add(Path(env_home) / "sessions")
+    add(DEFAULT_CONFIG_DIR / "sessions")
+    add(Path.home() / ".solcoder" / "sessions")
+    return candidates
+
+
+def _handle_dump_session(session_id: str, fmt: str, output: Optional[Path]) -> None:
+    fmt_normalized = fmt.lower()
+    if fmt_normalized not in {"json", "text"}:
+        typer.echo(f"❌ Unsupported dump format '{fmt}'. Use 'json' or 'text'.")
+        raise typer.Exit(code=1)
+
+    export_data: dict[str, object] | None = None
+    searched_roots: list[Path] = []
+    try:
+        for root in _candidate_session_roots():
+            manager = SessionManager(root=root)
+            try:
+                export_data = manager.export_session(session_id, redact=True)
+                break
+            except FileNotFoundError:
+                searched_roots.append(root)
+                continue
+        if export_data is None:
+            raise FileNotFoundError
+    except FileNotFoundError:
+        typer.echo(
+            f"⚠️ Session '{session_id}' not found. Only the most recent {MAX_SESSIONS} sessions are retained."
+        )
+        if searched_roots:
+            locations = ", ".join(str(path) for path in searched_roots)
+            typer.echo(f"   Checked locations: {locations}")
+        typer.echo("   Start a new session or increase retention via MAX_SESSIONS if needed.")
+        raise typer.Exit(code=1)
+    except SessionLoadError as exc:
+        typer.echo(f"❌ Failed to load session '{session_id}': {exc}")
+        raise typer.Exit(code=1)
+
+    if fmt_normalized == "json":
+        payload = json.dumps(export_data, indent=2)
+    else:
+        payload = _format_session_text(export_data)
+
+    if output is not None:
+        destination = output.expanduser()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(payload)
+        try:
+            os.chmod(destination, 0o600)
+        except PermissionError:
+            pass
+        typer.echo(f"✅ Session {session_id} exported to {destination}")
+    else:
+        typer.echo(payload)
+
+    raise typer.Exit()
+
+
+def _resolve_project_paths() -> tuple[Path, Path, Path]:
+    project_root = Path.cwd()
+    project_home = project_root / ".solcoder"
+    project_home.mkdir(parents=True, exist_ok=True)
+    global_home = DEFAULT_CONFIG_DIR
+    global_home.mkdir(parents=True, exist_ok=True)
+    return project_root, project_home, global_home
+
+
+def _show_balance(rpc_client: SolanaRPCClient | None, public_key: str | None) -> None:
+    if rpc_client is None or not public_key:
+        return
+    try:
+        balance = rpc_client.get_balance(public_key)
+    except Exception as exc:  # noqa: BLE001
+        typer.echo(f"⚠️  Unable to fetch wallet balance ({exc}).")
+        return
+    typer.echo(f"💰 Balance: {balance:.3f} SOL")
+
+
+def _prompt_unlock(wallet_manager: WalletManager) -> None:
+    attempts = 3
+    while attempts > 0:
+        passphrase = typer.prompt("Wallet passphrase", hide_input=True)
+        try:
+            wallet_manager.unlock_wallet(passphrase)
+            typer.echo("🔓 Wallet unlocked.")
+            return
+        except WalletError:
+            attempts -= 1
+            if attempts > 0:
+                typer.echo(f"❌ Incorrect passphrase. {attempts} attempts remaining.")
+            else:
+                typer.echo("⚠️  Wallet remains locked.")
+
+
+def _bootstrap_wallet(
+    wallet_manager: WalletManager,
+    rpc_client: SolanaRPCClient | None,
+    master_passphrase: str,
+) -> None:
+    if not wallet_manager.wallet_exists():
+        typer.echo("\n🔐 No SolCoder wallet found. Let's create or restore one before continuing.")
+        typer.echo("We'll reuse the passphrase you just set for SolCoder to keep everything in sync.")
+        while True:
+            choice = (
+                typer.prompt("Create new wallet or restore existing? [c/r]", default="c")
+                .strip()
+                .lower()
+            )
+            if choice in {"c", "create"}:
+                typer.echo("\nWe'll generate a recovery phrase. Store it securely—anyone with the phrase controls your funds.")
+                status, mnemonic = wallet_manager.create_wallet(master_passphrase, force=True)
+                typer.echo("✅ Wallet created and unlocked.")
+                _show_balance(rpc_client, status.public_key)
+                typer.echo("\n📝 Recovery phrase (write it down, keep it offline):")
+                typer.echo(mnemonic)
+                break
+            if choice in {"r", "restore"}:
+                method = (
+                    typer.prompt("Restore from recovery phrase or backup file? [phrase/file]", default="phrase")
+                    .strip()
+                    .lower()
+                )
+                if method in {"file", "f"}:
+                    path_input = typer.prompt("Path to wallet backup file")
+                    secret_path = Path(path_input).expanduser()
+                    if not secret_path.exists():
+                        typer.echo("❌ File not found. Please try again.")
+                        continue
+                    secret = secret_path.read_text().strip()
+                else:
+                    secret = typer.prompt("Enter recovery phrase or JSON/base58 secret")
+                try:
+                    status, mnemonic = wallet_manager.restore_wallet(secret, master_passphrase, overwrite=True)
+                except WalletError as exc:
+                    typer.echo(f"❌ {exc}")
+                    continue
+                typer.echo("✅ Wallet restored.")
+                try:
+                    wallet_manager.unlock_wallet(master_passphrase)
+                    typer.echo("🔓 Wallet unlocked.")
+                except WalletError:
+                    typer.echo("⚠️  Unable to unlock wallet with provided passphrase; it will remain locked.")
+                _show_balance(rpc_client, status.public_key)
+                if mnemonic:
+                    typer.echo("Recovery phrase stored from your input.")
+                break
+
+            else:
+                typer.echo("Please choose 'c' (create) or 'r' (restore).")
+        return
+
+    status = wallet_manager.status()
+    if not status.is_unlocked:
+        try:
+            wallet_manager.unlock_wallet(master_passphrase)
+            typer.echo("🔓 Wallet unlocked with your SolCoder passphrase.")
+            _show_balance(rpc_client, wallet_manager.status().public_key)
+        except WalletError:
+            if typer.confirm("Stored passphrase didn't unlock the wallet. Enter it manually?", default=True):
+                _prompt_unlock(wallet_manager)
+
+
+def _launch_shell(verbose: bool, session: Optional[str], new_session: bool, config_file: Optional[Path]) -> None:
+    project_root, project_home, global_home = _resolve_project_paths()
+    _configure_logging(verbose, log_dir=project_home / "logs")
+
+    config_override_path: Path | None = None
+    if config_file is not None:
+        config_override_path = config_file.expanduser()
+        if not config_override_path.exists():
+            typer.echo(f"❌ Config file '{config_override_path}' not found.")
+            raise typer.Exit(code=1)
+        config_override_path = config_override_path.resolve()
+
+    project_config_path: Path | None = None
+    if config_override_path is None:
+        candidate = project_home / CONFIG_FILENAME
+        if candidate.exists():
+            project_config_path = candidate
+
+    config_manager = ConfigManager(
+        config_dir=global_home,
+        project_config_path=project_config_path,
+        override_config_path=config_override_path,
+    )
+    config_context = config_manager.ensure(interactive=True)
+
+    session_manager = SessionManager(root=project_home / "sessions")
+    wallet_manager = WalletManager(keys_dir=global_home / "keys")
+    rpc_client = SolanaRPCClient(endpoint=config_context.config.rpc_url)
+    _bootstrap_wallet(wallet_manager, rpc_client, config_context.passphrase)
+    resume_id = None if new_session else session
+    if resume_id:
+        try:
+            session_context = session_manager.start(resume_id, active_project=str(project_root))
+        except FileNotFoundError:
+            typer.echo(f"⚠️  Session '{resume_id}' not found; starting a new session.")
+            session_context = session_manager.start(active_project=str(project_root))
+        except SessionLoadError as exc:
+            typer.echo(f"⚠️  {exc}. Starting a new session.")
+            session_context = session_manager.start(active_project=str(project_root))
+    else:
+        session_context = session_manager.start(active_project=str(project_root))
+
+    try:
+        CLIApp(
+            config_context=config_context,
+            session_context=session_context,
+            session_manager=session_manager,
+            wallet_manager=wallet_manager,
+            rpc_client=rpc_client,
+        ).run()
+    finally:
+        session_manager.save(session_context)
+
+
+@app.command()
+def run(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),  # noqa: B008
+    session: Optional[str] = typer.Option(None, "--session", help="Resume the given session ID"),  # noqa: B008
+    new_session: bool = typer.Option(False, "--new-session", help="Start a fresh session"),  # noqa: B008
+    config: Optional[Path] = typer.Option(None, "--config", help="Use an alternate config file and skip project overrides"),  # noqa: B008
+) -> None:
+    """Launch the SolCoder interactive shell."""
+    _launch_shell(verbose, session, new_session, config)
+
+
+@app.command()
+def version() -> None:
+    """Show CLI version."""
+    try:
+        pkg_version = metadata.version("solcoder")
+    except metadata.PackageNotFoundError:
+        pkg_version = "0.0.0"
+    typer.echo(f"SolCoder CLI version {pkg_version}")
+
+
+def _extract_dump_args(args: list[str]) -> tuple[Optional[str], str, Optional[Path], list[str]]:
+    session_id: Optional[str] = None
+    dump_format = "json"
+    dump_output: Optional[Path] = None
+    remaining: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--dump-session"):
+            value: Optional[str] = None
+            if arg == "--dump-session":
+                if i + 1 >= len(args):
+                    typer.echo("❌ Option '--dump-session' requires a session id.")
+                    raise typer.Exit(code=2)
+                value = args[i + 1]
+                i += 2
+            else:
+                value = arg.split("=", 1)[1]
+                i += 1
+            if not value:
+                typer.echo("❌ Session id for '--dump-session' cannot be empty.")
+                raise typer.Exit(code=2)
+            session_id = value
+            continue
+        if arg.startswith("--dump-format"):
+            if arg == "--dump-format":
+                if i + 1 >= len(args):
+                    typer.echo("❌ Option '--dump-format' requires a value (json or text).")
+                    raise typer.Exit(code=2)
+                dump_format = args[i + 1]
+                i += 2
+            else:
+                dump_format = arg.split("=", 1)[1]
+                i += 1
+            continue
+        if arg.startswith("--dump-output"):
+            if arg == "--dump-output":
+                if i + 1 >= len(args):
+                    typer.echo("❌ Option '--dump-output' requires a file path.")
+                    raise typer.Exit(code=2)
+                dump_output = Path(args[i + 1]).expanduser()
+                i += 2
+            else:
+                dump_output = Path(arg.split("=", 1)[1]).expanduser()
+                i += 1
+            continue
+        remaining.append(arg)
+        i += 1
+    return session_id, dump_format, dump_output, remaining
+
+
+def main() -> None:
+    """Poetry entrypoint."""
+    args = sys.argv[1:]
+    dump_session, dump_format, dump_output, remaining = _extract_dump_args(args)
+    if dump_session:
+        _handle_dump_session(dump_session, dump_format, dump_output)
+        return
+
+    direct = _parse_direct_launch_args(remaining)
+    if direct == "version":
+        app(args=["version"])
+        return
+    if isinstance(direct, tuple):
+        verbose, session, new_session, config_path = direct
+        _launch_shell(verbose, session, new_session, config_path)
+        return
+    if remaining and remaining[0] == "--template":
+        if len(remaining) < 2:
+            typer.echo("❌ Option '--template' requires a template name.")
+            raise typer.Exit(code=2)
+        template_name = remaining[1]
+        _render_template_cli(template_name, remaining[2:])
+        return
+    if remaining and remaining[0].startswith("-") and remaining[0] not in {"--help", "-h"}:
+        app(args=["run", *remaining])
+        return
+    app(args=remaining or None)
+
+
+__all__ = ["CLIApp", "app", "main"]

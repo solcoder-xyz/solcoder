@@ -1,0 +1,69 @@
+[tool.poetry]
+name = "solcoder"
+version = "0.1.0"
+description = "CLI-first AI agent that scaffolds, deploys, and funds Solana dApps from natural language."
+authors = ["SolCoder Team <team@solcoder.dev>"]
+readme = "README.md"
+packages = [{ include = "solcoder", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+prompt-toolkit = "^3.0.43"
+rich = "^13.7.1"
+typer = {version = "^0.12.3", extras = ["all"]}
+pydantic = "^2.6.4"
+cryptography = "^42.0.5"
+jinja2 = "^3.1.3"
+httpx = "^0.27.0"
+pyyaml = "^6.0.1"
+structlog = "^24.1.0"
+tomli-w = "^1.0.0"
+mnemonic = "^0.21"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.3.0"
+ruff = "^0.3.4"
+pytest = "^8.1.1"
+pytest-asyncio = "^0.23.5"
+coverage = "^7.4.4"
+mypy = "^1.9.0"
+types-pyyaml = "^6.0.12.20240311"
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+include = "\\.pyi?$"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I", "UP", "N", "S"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S106"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["solcoder"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = [
+  "tests"
+]
+
+[tool.coverage.run]
+branch = true
+source = ["solcoder"]
+omit = [
+  "tests/*"
+]
+
+[build-system]
+requires = ["poetry-core>=1.8.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+solcoder = "solcoder.cli:main"
