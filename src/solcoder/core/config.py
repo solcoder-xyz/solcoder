@@ -46,8 +46,16 @@ class SolCoderConfig(BaseModel):
     telemetry: bool = False
     llm_provider: str = "openai"
     llm_base_url: str = "https://api.openai.com/v1"
-    llm_model: str = "gpt-4o-mini"
+    llm_model: str = "gpt-5-codex"
     tool_controls: dict[str, str] | None = None
+    llm_reasoning_effort: str = "medium"
+    history_max_messages: int = 20
+    history_summary_keep: int = 10
+    history_summary_max_words: int = 200
+    history_auto_compact_threshold: float = 0.95
+    llm_input_token_limit: int = 272_000
+    llm_output_token_limit: int = 128_000
+    history_compaction_cooldown: int = 10
 
 
 @dataclass
@@ -128,6 +136,7 @@ class ConfigManager:
         interactive: bool = True,
         llm_base_url: str | None = None,
         llm_model: str | None = None,
+        llm_reasoning: str | None = None,
         llm_api_key: str | None = None,
         passphrase: str | None = None,
     ) -> ConfigContext:
@@ -140,12 +149,26 @@ class ConfigManager:
                 passphrase=passphrase,
                 interactive=interactive,
             )
+
+            updates: dict[str, str] = {}
+            if llm_base_url and config.llm_base_url != llm_base_url:
+                config.llm_base_url = llm_base_url
+                updates["llm_base_url"] = llm_base_url
+            if llm_model and config.llm_model != llm_model:
+                config.llm_model = llm_model
+                updates["llm_model"] = llm_model
+            if llm_reasoning and config.llm_reasoning_effort != llm_reasoning:
+                config.llm_reasoning_effort = llm_reasoning
+                updates["llm_reasoning_effort"] = llm_reasoning
+            if updates:
+                self.update_llm_preferences(**updates)
             return ConfigContext(config=config, llm_api_key=api_key, passphrase=used_passphrase)
 
         return self._bootstrap_config(
             interactive=interactive,
             llm_base_url=llm_base_url,
             llm_model=llm_model,
+            llm_reasoning=llm_reasoning,
             llm_api_key=llm_api_key,
             passphrase=passphrase,
         )
@@ -159,6 +182,7 @@ class ConfigManager:
         interactive: bool,
         llm_base_url: str | None,
         llm_model: str | None,
+        llm_reasoning: str | None,
         llm_api_key: str | None,
         passphrase: str | None,
     ) -> ConfigContext:
@@ -168,9 +192,13 @@ class ConfigManager:
         if interactive:
             base_url = self._prompt("LLM base URL", default=base_url)
 
-        model = llm_model or os.environ.get("SOLCODER_LLM_MODEL") or "gpt-4o-mini"
+        model = llm_model or os.environ.get("SOLCODER_LLM_MODEL") or "gpt-5-codex"
         if interactive:
             model = self._prompt("LLM model", default=model)
+
+        reasoning = llm_reasoning or os.environ.get("SOLCODER_LLM_REASONING") or "medium"
+        if interactive:
+            reasoning = self._prompt("LLM reasoning effort", default=reasoning)
 
         api_key = llm_api_key or os.environ.get("SOLCODER_LLM_API_KEY")
         if not api_key:
@@ -188,8 +216,12 @@ class ConfigManager:
                 confirmation_prompt=True,
             )
 
-        config = SolCoderConfig(llm_base_url=base_url, llm_model=model)
-        self._save_config(config)
+        base_config_data = {
+            "llm_base_url": base_url,
+            "llm_model": model,
+            "llm_reasoning_effort": reasoning,
+        }
+        self.update_llm_preferences(**base_config_data)
         merged_config = self._load_config()
         self._credential_store.save(passphrase_value, api_key)
         self._echo("✅ SolCoder configuration saved to " + str(self.config_path))
@@ -212,6 +244,51 @@ class ConfigManager:
 
     def _save_config(self, config: SolCoderConfig) -> None:
         self.config_path.write_text(tomli_w.dumps(config.model_dump(exclude_none=True)))
+
+    def _update_base_config(self, **updates: object) -> None:
+        current = self._read_config_dict(self.config_path)
+        current = current.copy() if current else {}
+        current.update(updates)
+        base_config = SolCoderConfig(**current)
+        self._save_config(base_config)
+
+    def update_llm_preferences(
+        self,
+        *,
+        llm_base_url: str | None = None,
+        llm_model: str | None = None,
+        llm_reasoning_effort: str | None = None,
+        history_max_messages: int | None = None,
+        history_summary_keep: int | None = None,
+        history_summary_max_words: int | None = None,
+        history_auto_compact_threshold: float | None = None,
+        llm_input_token_limit: int | None = None,
+        llm_output_token_limit: int | None = None,
+        history_compaction_cooldown: int | None = None,
+    ) -> None:
+        updates: dict[str, str] = {}
+        if llm_base_url is not None:
+            updates["llm_base_url"] = llm_base_url
+        if llm_model is not None:
+            updates["llm_model"] = llm_model
+        if llm_reasoning_effort is not None:
+            updates["llm_reasoning_effort"] = llm_reasoning_effort
+        if history_max_messages is not None:
+            updates["history_max_messages"] = history_max_messages
+        if history_summary_keep is not None:
+            updates["history_summary_keep"] = history_summary_keep
+        if history_summary_max_words is not None:
+            updates["history_summary_max_words"] = history_summary_max_words
+        if history_auto_compact_threshold is not None:
+            updates["history_auto_compact_threshold"] = history_auto_compact_threshold
+        if llm_input_token_limit is not None:
+            updates["llm_input_token_limit"] = llm_input_token_limit
+        if llm_output_token_limit is not None:
+            updates["llm_output_token_limit"] = llm_output_token_limit
+        if history_compaction_cooldown is not None:
+            updates["history_compaction_cooldown"] = history_compaction_cooldown
+        if updates:
+            self._update_base_config(**updates)
 
     def _read_config_dict(self, path: Path | None) -> dict[str, Any]:
         if path is None:

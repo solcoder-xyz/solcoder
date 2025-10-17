@@ -26,6 +26,13 @@ def test_bootstrap_creates_config_and_credentials(tmp_path: Path) -> None:
     assert isinstance(context, ConfigContext)
     assert context.config.llm_base_url == "https://api.example.com/v1"
     assert context.llm_api_key == "secret-key"
+    assert context.config.llm_reasoning_effort == "medium"
+    assert context.config.history_max_messages == 20
+    assert context.config.history_summary_keep == 10
+    assert context.config.history_summary_max_words == 200
+    assert context.config.history_auto_compact_threshold == 0.95
+    assert context.config.llm_input_token_limit == 272_000
+    assert context.config.llm_output_token_limit == 128_000
     assert (tmp_path / "config.toml").exists()
     assert (tmp_path / "credentials.json").exists()
     assert context.passphrase == "passphrase"
@@ -53,6 +60,7 @@ def test_env_overrides_used_when_interactive_false(tmp_path: Path, monkeypatch: 
     monkeypatch.setenv("SOLCODER_LLM_MODEL", "fake-model")
     monkeypatch.setenv("SOLCODER_LLM_API_KEY", "env-secret")
     monkeypatch.setenv("SOLCODER_LLM_PASSPHRASE", "env-pass")
+    monkeypatch.setenv("SOLCODER_LLM_REASONING", "high")
 
     manager = make_manager(tmp_path)
     context = manager.ensure(interactive=False)
@@ -60,11 +68,61 @@ def test_env_overrides_used_when_interactive_false(tmp_path: Path, monkeypatch: 
     assert context.config.llm_base_url == "https://api.fake/v1"
     assert context.llm_api_key == "env-secret"
     assert context.passphrase == "env-pass"
+    assert context.config.llm_reasoning_effort == "high"
     # ensure we can reload with env-provided passphrase
     manager2 = make_manager(tmp_path)
     context2 = manager2.ensure(interactive=False)
     assert context2.llm_api_key == "env-secret"
     assert context2.passphrase == "env-pass"
+    assert context2.config.llm_reasoning_effort == "high"
+
+
+def test_update_llm_preferences_persists_additional_fields(tmp_path: Path) -> None:
+    manager = make_manager(tmp_path)
+    context = manager.ensure(interactive=False, llm_api_key="secret", passphrase="pass")
+
+    manager.update_llm_preferences(
+        llm_model="gpt-5",
+        llm_reasoning_effort="high",
+        history_max_messages=30,
+        history_summary_keep=6,
+        history_summary_max_words=300,
+        history_auto_compact_threshold=0.9,
+        llm_input_token_limit=300_000,
+        llm_output_token_limit=150_000,
+    )
+
+    reloaded = manager.ensure(interactive=False, passphrase="pass")
+    assert reloaded.config.llm_model == "gpt-5"
+    assert reloaded.config.llm_reasoning_effort == "high"
+    assert reloaded.config.history_max_messages == 30
+    assert reloaded.config.history_summary_keep == 6
+    assert reloaded.config.history_summary_max_words == 300
+    assert reloaded.config.history_auto_compact_threshold == 0.9
+    assert reloaded.config.llm_input_token_limit == 300_000
+    assert reloaded.config.llm_output_token_limit == 150_000
+
+
+def test_ensure_updates_existing_config(tmp_path: Path) -> None:
+    manager = make_manager(tmp_path)
+    manager.ensure(
+        interactive=False,
+        llm_api_key="secret",
+        passphrase="passphrase",
+    )
+
+    manager.ensure(
+        interactive=False,
+        llm_model="gpt-5",
+        llm_reasoning="high",
+        llm_base_url="https://api.example.com/v2",
+        passphrase="passphrase",
+    )
+
+    reloaded = manager.ensure(interactive=False, passphrase="passphrase")
+    assert reloaded.config.llm_model == "gpt-5"
+    assert reloaded.config.llm_reasoning_effort == "high"
+    assert reloaded.config.llm_base_url == "https://api.example.com/v2"
 
 
 def test_project_config_overrides_global(tmp_path: Path) -> None:

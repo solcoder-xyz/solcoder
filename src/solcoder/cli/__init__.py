@@ -16,8 +16,15 @@ from typer.core import TyperOption
 
 from typing import Optional
 
-from solcoder.core import ConfigManager, DEFAULT_CONFIG_DIR, TemplateError, render_template
+from solcoder.core import (
+    ConfigContext,
+    ConfigManager,
+    DEFAULT_CONFIG_DIR,
+    TemplateError,
+    render_template,
+)
 from solcoder.core.config import CONFIG_FILENAME
+from solcoder.core.llm import LLMClient, LLMError, LLMSettings
 from solcoder.session import SessionLoadError, SessionManager
 from solcoder.session.manager import MAX_SESSIONS
 from solcoder.solana import SolanaRPCClient, WalletError, WalletManager
@@ -368,7 +375,123 @@ def _bootstrap_wallet(
                 _prompt_unlock(wallet_manager)
 
 
-def _launch_shell(verbose: bool, session: Optional[str], new_session: bool, config_file: Optional[Path]) -> None:
+def _prepare_llm_client(
+    config_manager: ConfigManager,
+    config_context: ConfigContext,
+    *,
+    provider_override: str | None = None,
+    base_url_override: str | None = None,
+    model_override: str | None = None,
+    reasoning_override: str | None = None,
+    api_key_override: str | None = None,
+    offline_mode: bool = False,
+) -> LLMClient:
+    updated = False
+    if provider_override:
+        config_context.config.llm_provider = provider_override
+        updated = True
+    if base_url_override:
+        config_context.config.llm_base_url = base_url_override
+        updated = True
+    if model_override:
+        config_context.config.llm_model = model_override
+        updated = True
+    if reasoning_override:
+        config_context.config.llm_reasoning_effort = reasoning_override
+        updated = True
+    if api_key_override:
+        config_context.llm_api_key = api_key_override
+
+    offline = offline_mode or not config_context.llm_api_key
+    api_key = None if offline else config_context.llm_api_key
+
+    settings = LLMSettings(
+        provider=config_context.config.llm_provider,
+        base_url=config_context.config.llm_base_url,
+        model=config_context.config.llm_model,
+        api_key=api_key,
+        offline_mode=offline,
+        reasoning_effort=config_context.config.llm_reasoning_effort,
+    )
+    if updated:
+        config_manager.update_llm_preferences(
+            llm_base_url=config_context.config.llm_base_url,
+            llm_model=config_context.config.llm_model,
+            llm_reasoning_effort=config_context.config.llm_reasoning_effort,
+        )
+    return LLMClient(settings)
+
+
+def _run_llm_dry_run(
+    config_manager: ConfigManager,
+    *,
+    provider: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+    reasoning: str | None = None,
+    api_key: str | None = None,
+    offline_mode: bool = False,
+) -> None:
+    typer.echo("🔍 SolCoder LLM dry run")
+    config_context = config_manager.ensure(
+        interactive=True,
+        llm_base_url=base_url,
+        llm_model=model,
+        llm_reasoning=reasoning,
+        llm_api_key=api_key,
+    )
+    llm_client = _prepare_llm_client(
+        config_manager,
+        config_context,
+        provider_override=provider,
+        base_url_override=base_url,
+        model_override=model,
+        reasoning_override=reasoning,
+        api_key_override=api_key,
+        offline_mode=offline_mode,
+    )
+
+    tokens: list[str] = []
+
+    def _on_chunk(chunk: str) -> None:
+        tokens.append(chunk)
+        typer.echo(chunk, nl=False)
+
+    try:
+        result = llm_client.stream_chat(
+            "Say hello from SolCoder in one sentence.",
+            history=(),
+            on_chunk=_on_chunk,
+        )
+    except LLMError as exc:
+        typer.echo(f"❌ LLM error: {exc}")
+        raise typer.Exit(code=1) from exc
+    finally:
+        llm_client.close()
+
+    if tokens:
+        typer.echo()
+    status = "cached" if result.cached else "live"
+    typer.echo(
+        f"✅ LLM dry run completed in {result.latency_seconds:.2f}s using {config_context.config.llm_provider}:{config_context.config.llm_model} ({status}, reasoning={config_context.config.llm_reasoning_effort})"
+    )
+    raise typer.Exit()
+
+
+def _launch_shell(
+    verbose: bool,
+    session: Optional[str],
+    new_session: bool,
+    config_file: Optional[Path],
+    *,
+    llm_provider: str | None = None,
+    llm_base_url: str | None = None,
+    llm_model: str | None = None,
+    llm_reasoning: str | None = None,
+    llm_api_key: str | None = None,
+    offline_mode: bool = False,
+    dry_run_llm: bool = False,
+) -> None:
     project_root, project_home, global_home = _resolve_project_paths()
     _configure_logging(verbose, log_dir=project_home / "logs")
 
@@ -391,7 +514,42 @@ def _launch_shell(verbose: bool, session: Optional[str], new_session: bool, conf
         project_config_path=project_config_path,
         override_config_path=config_override_path,
     )
-    config_context = config_manager.ensure(interactive=True)
+
+    if dry_run_llm:
+        _run_llm_dry_run(
+            config_manager,
+            provider=llm_provider,
+            base_url=llm_base_url,
+            model=llm_model,
+            reasoning=llm_reasoning,
+            api_key=llm_api_key,
+            offline_mode=offline_mode,
+        )
+        return
+
+    config_context = config_manager.ensure(
+        interactive=True,
+        llm_base_url=llm_base_url,
+        llm_model=llm_model,
+        llm_reasoning=llm_reasoning,
+        llm_api_key=llm_api_key,
+    )
+
+    llm_client: LLMClient | None = None
+    try:
+        llm_client = _prepare_llm_client(
+            config_manager,
+            config_context,
+            provider_override=llm_provider,
+            base_url_override=llm_base_url,
+            model_override=llm_model,
+            reasoning_override=llm_reasoning,
+            api_key_override=llm_api_key,
+            offline_mode=offline_mode,
+        )
+    except LLMError as exc:
+        typer.echo(f"❌ Unable to initialize LLM client: {exc}")
+        raise typer.Exit(code=1) from exc
 
     session_manager = SessionManager(root=project_home / "sessions")
     wallet_manager = WalletManager(keys_dir=global_home / "keys")
@@ -413,12 +571,16 @@ def _launch_shell(verbose: bool, session: Optional[str], new_session: bool, conf
     try:
         CLIApp(
             config_context=config_context,
+            config_manager=config_manager,
             session_context=session_context,
             session_manager=session_manager,
             wallet_manager=wallet_manager,
             rpc_client=rpc_client,
+            llm=llm_client,
         ).run()
     finally:
+        if llm_client is not None:
+            llm_client.close()
         session_manager.save(session_context)
 
 
@@ -428,9 +590,28 @@ def run(
     session: Optional[str] = typer.Option(None, "--session", help="Resume the given session ID"),  # noqa: B008
     new_session: bool = typer.Option(False, "--new-session", help="Start a fresh session"),  # noqa: B008
     config: Optional[Path] = typer.Option(None, "--config", help="Use an alternate config file and skip project overrides"),  # noqa: B008
+    llm_provider: Optional[str] = typer.Option(None, "--llm-provider", help="Override the configured LLM provider"),  # noqa: B008
+    llm_base_url: Optional[str] = typer.Option(None, "--llm-base-url", help="Override the LLM base URL"),  # noqa: B008
+    llm_model: Optional[str] = typer.Option(None, "--llm-model", help="Override the LLM model"),  # noqa: B008
+    llm_reasoning: Optional[str] = typer.Option(None, "--llm-reasoning", help="Override the LLM reasoning effort (low|medium|high)"),  # noqa: B008
+    llm_api_key: Optional[str] = typer.Option(None, "--llm-api-key", help="Use this API key for the current run without persisting it"),  # noqa: B008
+    offline_mode: bool = typer.Option(False, "--offline-mode", help="Force offline stubbed LLM responses", is_flag=True),  # noqa: B008
+    dry_run_llm: bool = typer.Option(False, "--dry-run-llm", help="Send a single LLM request and exit"),  # noqa: B008
 ) -> None:
     """Launch the SolCoder interactive shell."""
-    _launch_shell(verbose, session, new_session, config)
+    _launch_shell(
+        verbose,
+        session,
+        new_session,
+        config,
+        llm_provider=llm_provider,
+        llm_base_url=llm_base_url,
+        llm_model=llm_model,
+        llm_reasoning=llm_reasoning,
+        llm_api_key=llm_api_key,
+        offline_mode=offline_mode,
+        dry_run_llm=dry_run_llm,
+    )
 
 
 @app.command()

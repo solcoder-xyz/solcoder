@@ -6,11 +6,11 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
@@ -20,6 +20,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from solcoder.core import (
+    ConfigManager,
     ConfigContext,
     DiagnosticResult,
     RenderOptions,
@@ -28,6 +29,7 @@ from solcoder.core import (
     render_template,
     TemplateError,
 )
+from solcoder.core.llm import LLMError, LLMResponse
 from solcoder.session import TRANSCRIPT_LIMIT, SessionContext, SessionManager, SessionLoadError
 from solcoder.session.manager import MAX_SESSIONS
 from solcoder.solana import SolanaRPCClient, WalletError, WalletManager, WalletStatus
@@ -36,6 +38,13 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_HISTORY_PATH = Path(os.environ.get("SOLCODER_HOME", Path.home() / ".solcoder")) / "history"
+DEFAULT_HISTORY_LIMIT = 20
+DEFAULT_SUMMARY_KEEP = 10
+DEFAULT_SUMMARY_MAX_WORDS = 200
+DEFAULT_AUTO_COMPACT_THRESHOLD = 0.95
+DEFAULT_LLM_INPUT_LIMIT = 272_000
+DEFAULT_LLM_OUTPUT_LIMIT = 128_000
+DEFAULT_COMPACTION_COOLDOWN = 10
 
 
 @dataclass
@@ -45,6 +54,21 @@ class CommandResponse:
     messages: list[tuple[str, str]]
     continue_loop: bool = True
     tool_calls: list[dict[str, Any]] | None = None
+    rendered_roles: set[str] | None = None
+
+
+class LLMBackend(Protocol):
+    """Interface for SolCoder LLM adapters."""
+
+    def stream_chat(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+        history: Sequence[dict[str, str]] | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> LLMResponse:
+        ...
 
 
 def _parse_template_tokens(
@@ -161,10 +185,42 @@ class StubLLM:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.model = "gpt-5-codex"
+        self.reasoning_effort = "medium"
 
     def respond(self, prompt: str) -> str:
         self.calls.append(prompt)
         return f"[stub] I heard: {prompt}"
+
+    def stream_chat(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+        history: Sequence[dict[str, str]] | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> LLMResponse:
+        reply = self.respond(prompt)
+        if on_chunk:
+            on_chunk(reply)
+        words_in = max(len(prompt.split()), 1)
+        words_out = max(len(reply.split()), 1)
+        return LLMResponse(
+            text=reply,
+            latency_seconds=0.0,
+            cached=True,
+            token_usage={
+                "input_tokens": words_in,
+                "output_tokens": words_out,
+                "total_tokens": words_in + words_out,
+            },
+        )
+
+    def update_settings(self, *, model: str | None = None, reasoning_effort: str | None = None) -> None:
+        if model:
+            self.model = model
+        if reasoning_effort:
+            self.reasoning_effort = reasoning_effort
 
 
 class CLIApp:
@@ -174,8 +230,9 @@ class CLIApp:
         self,
         console: Console | None = None,
         history_path: Path | None = None,
-        llm: StubLLM | None = None,
+        llm: LLMBackend | None = None,
         config_context: ConfigContext | None = None,
+        config_manager: ConfigManager | None = None,
         session_context: SessionContext | None = None,
         session_manager: SessionManager | None = None,
         wallet_manager: WalletManager | None = None,
@@ -183,6 +240,7 @@ class CLIApp:
     ) -> None:
         self.console = console or CLIApp._default_console()
         self.config_context = config_context
+        self.config_manager = config_manager
         self.session_manager = session_manager or SessionManager()
         self.session_context = session_context or self.session_manager.start()
         self.wallet_manager = wallet_manager or WalletManager()
@@ -195,7 +253,7 @@ class CLIApp:
         self.session = PromptSession(history=FileHistory(str(history_path)))
         self.command_router = CommandRouter()
         self._register_builtin_commands()
-        self._llm = llm or StubLLM()
+        self._llm: LLMBackend = llm or StubLLM()
         self._transcript = self.session_context.transcript
         initial_status = self.wallet_manager.status()
         initial_balance = self._fetch_balance(initial_status.public_key)
@@ -256,6 +314,8 @@ class CLIApp:
 
                 response = self.handle_line(user_input)
                 for role, message in response.messages:
+                    if response.rendered_roles and role in response.rendered_roles:
+                        continue
                     self._render_message(role, message)
 
                 if not response.continue_loop:
@@ -277,19 +337,269 @@ class CLIApp:
             logger.debug("Processing slash command: %s", raw_line)
             response = self.command_router.dispatch(self, raw_line[1:])
         else:
-            logger.debug("Routing chat message to LLM stub")
-            reply = self._llm.respond(raw_line)
-            response = CommandResponse(messages=[("agent", reply)])
+            logger.debug("Routing chat message to LLM backend")
+            response = self._chat_with_llm(raw_line)
 
         for idx, (role, message) in enumerate(response.messages):
             tool_calls = response.tool_calls if idx == 0 else None
             self._record(role, message, tool_calls=tool_calls)
+        self._compress_history_if_needed()
         self._persist()
         return response
 
     # ------------------------------------------------------------------
     # Command handlers
     # ------------------------------------------------------------------
+    def _chat_with_llm(self, prompt: str) -> CommandResponse:
+        history = self._conversation_history()
+        tokens: list[str] = []
+
+        model_name = "unknown"
+        provider_name = "unknown"
+        reasoning_effort = "medium"
+        if self.config_context:
+            model_name = self.config_context.config.llm_model
+            provider_name = self.config_context.config.llm_provider
+            reasoning_effort = getattr(self.config_context.config, "llm_reasoning_effort", "medium")
+
+        system_prompt = (
+            "You are SolCoder, an on-device coding assistant. Be helpful and concise. "
+            "When asked about your identity or configuration, accurately mention the active model, provider, "
+            "and reasoning effort without repeating this information unnecessarily.\n"
+            f"Current configuration: provider={provider_name}, model={model_name}, reasoning_effort={reasoning_effort}."
+        )
+
+        try:
+            with self.console.status("[cyan]Thinking…[/cyan]", spinner="dots"):
+                result = self._llm.stream_chat(
+                    prompt,
+                    history=history,
+                    system_prompt=system_prompt,
+                    on_chunk=tokens.append,
+                )
+        except LLMError as exc:
+            logger.error("LLM error: %s", exc)
+            return CommandResponse(messages=[("system", f"LLM error: {exc}")])
+
+        reply_text = "".join(tokens) or getattr(result, "text", "")
+        if not reply_text:
+            reply_text = "[no response]"
+
+        self._render_message("agent", reply_text)
+
+        summary = [
+            {
+                "type": "llm",
+                "name": f"{provider_name}:{model_name}",
+                "status": "cached" if getattr(result, "cached", False) else "success",
+                "latency": round(getattr(result, "latency_seconds", 0.0), 3),
+            }
+        ]
+        finish_reason = getattr(result, "finish_reason", None)
+        if finish_reason:
+            summary[0]["summary"] = f"finish={finish_reason}"
+        token_usage = getattr(result, "token_usage", None)
+        if token_usage:
+            summary[0]["token_usage"] = token_usage
+        reported_effort = getattr(self.config_context.config, "llm_reasoning_effort", None) if self.config_context else None
+        if reported_effort:
+            summary[0]["reasoning_effort"] = reported_effort
+        if token_usage:
+            input_tokens = int(
+                token_usage.get("input_tokens")
+                or token_usage.get("prompt_tokens")
+                or 0
+            )
+            output_tokens = int(
+                token_usage.get("output_tokens")
+                or token_usage.get("completion_tokens")
+                or 0
+            )
+            metadata = self.session_context.metadata
+            metadata.llm_input_tokens += max(input_tokens, 0)
+            metadata.llm_output_tokens += max(output_tokens, 0)
+            metadata.llm_last_input_tokens = max(input_tokens, 0)
+            metadata.llm_last_output_tokens = max(output_tokens, 0)
+
+        return CommandResponse(
+            messages=[("agent", reply_text)],
+            tool_calls=summary,
+            rendered_roles={"agent"},
+        )
+
+    def _conversation_history(self) -> list[dict[str, str]]:
+        history: list[dict[str, str]] = []
+        # Exclude the most recent entry (current user prompt) because it is passed separately.
+        transcript = self._transcript[:-1]
+        for entry in transcript:
+            message = entry.get("message")
+            if not isinstance(message, str) or not message:
+                continue
+            if entry.get("summary"):
+                history.append({"role": "system", "content": message})
+                continue
+            role = entry.get("role")
+            if role == "user":
+                history.append({"role": "user", "content": message})
+            elif role == "agent":
+                history.append({"role": "assistant", "content": message})
+            else:
+                history.append({"role": "system", "content": message})
+        return history
+
+    def _update_llm_settings(self, *, model: str | None = None, reasoning: str | None = None) -> None:
+        if self.config_context is None:
+            return
+        if model:
+            self.config_context.config.llm_model = model
+        if reasoning:
+            self.config_context.config.llm_reasoning_effort = reasoning
+        update_kwargs: dict[str, str] = {}
+        if model:
+            update_kwargs["model"] = model
+        if reasoning:
+            update_kwargs["reasoning_effort"] = reasoning
+        if update_kwargs and hasattr(self._llm, "update_settings"):
+            try:
+                self._llm.update_settings(**update_kwargs)  # type: ignore[misc]
+            except Exception:  # noqa: BLE001
+                logger.warning("LLM backend does not support runtime setting updates.")
+        if self.config_manager is not None:
+            try:
+                self.config_manager.update_llm_preferences(
+                    llm_model=model if model else None,
+                    llm_reasoning_effort=reasoning if reasoning else None,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to persist LLM settings: %s", exc)
+
+    def _compress_history_if_needed(self) -> None:
+        transcript = self.session_context.transcript
+        history_limit = self._config_int("history_max_messages", DEFAULT_HISTORY_LIMIT)
+        cooldown = self.session_context.metadata.compression_cooldown
+        if len(transcript) > history_limit and cooldown <= 0:
+            self._summarize_older_history()
+        metadata = self.session_context.metadata
+        input_limit = self._config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
+        threshold = self._config_float("history_auto_compact_threshold", DEFAULT_AUTO_COMPACT_THRESHOLD)
+        if metadata.llm_last_input_tokens >= int(input_limit * threshold) and cooldown <= 0:
+            self._compress_full_history()
+        metadata.compression_cooldown = max(metadata.compression_cooldown - 1, 0)
+
+    def _summarize_older_history(self) -> None:
+        transcript = self.session_context.transcript
+        history_limit = self._config_int("history_max_messages", DEFAULT_HISTORY_LIMIT)
+        keep_count = self._config_int("history_summary_keep", DEFAULT_SUMMARY_KEEP)
+        if keep_count >= history_limit:
+            keep_count = max(history_limit - 2, 1)
+        if len(transcript) <= keep_count:
+            return
+        older = transcript[:-keep_count]
+        if not older:
+            return
+        summary_text = self._generate_summary(older)
+        summary_entry = {
+            "role": "system",
+            "message": summary_text,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "summary": True,
+        }
+        self.session_context.transcript = [summary_entry, *transcript[-keep_count:]]
+        self._transcript = self.session_context.transcript
+        input_limit = self._config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
+        self.session_context.metadata.llm_last_input_tokens = min(
+            self._estimate_context_tokens(),
+            input_limit,
+        )
+        self.session_context.metadata.compression_cooldown = self._config_int(
+            "history_compaction_cooldown",
+            DEFAULT_COMPACTION_COOLDOWN,
+        )
+
+    def _compress_full_history(self) -> None:
+        transcript = self.session_context.transcript
+        keep_count = self._config_int("history_summary_keep", DEFAULT_SUMMARY_KEEP)
+        keep_count = max(min(keep_count, len(transcript)), 1)
+        if len(transcript) <= keep_count:
+            return
+        keep = transcript[-keep_count:]
+        summary_text = self._generate_summary(transcript[:-keep_count])
+        summary_entry = {
+            "role": "system",
+            "message": summary_text,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "summary": True,
+        }
+        self.session_context.transcript = [summary_entry, *keep]
+        self._transcript = self.session_context.transcript
+        estimated = self._estimate_context_tokens()
+        metadata = self.session_context.metadata
+        input_limit = self._config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
+        metadata.llm_last_input_tokens = min(estimated, input_limit)
+        metadata.compression_cooldown = self._config_int(
+            "history_compaction_cooldown",
+            DEFAULT_COMPACTION_COOLDOWN,
+        )
+
+    def _generate_summary(self, entries: list[dict[str, Any]]) -> str:
+        if not entries:
+            return "(history empty)"
+        conversation_lines: list[str] = []
+        for entry in entries:
+            role = entry.get("role", "unknown")
+            message = entry.get("message", "")
+            conversation_lines.append(f"{role}: {message}")
+        transcript_text = "\n".join(conversation_lines)
+        base_words = self._config_int("history_summary_max_words", DEFAULT_SUMMARY_MAX_WORDS)
+        keep_count = self._config_int("history_summary_keep", DEFAULT_SUMMARY_KEEP)
+        multiplier = max(1, len(entries) // max(1, keep_count))
+        max_words = base_words * multiplier
+        prompt = (
+            f"Summarize the following SolCoder chat history in no more than {max_words} words. "
+            "Highlight user goals, decisions, constraints, and any open questions.\n"
+            f"Conversation:\n{transcript_text}\n"
+            "Return plain text without bullet characters unless required."
+        )
+        tokens: list[str] = []
+        try:
+            result = self._llm.stream_chat(
+                prompt,
+                history=(),
+                system_prompt="You are a concise summarization engine for coding assistant transcripts.",
+                on_chunk=tokens.append,
+            )
+            summary_text = "".join(tokens).strip() or result.text.strip()
+        except LLMError as exc:
+            logger.warning("LLM summarization failed: %s", exc)
+            summary_text = "Summary unavailable. Recent highlights:\n" + "\n".join(conversation_lines[-3:])
+        if not summary_text:
+            summary_text = "Summary not available."
+        return summary_text
+
+    def _estimate_context_tokens(self) -> int:
+        total = 0
+        for entry in self.session_context.transcript:
+            message = entry.get("message")
+            if isinstance(message, str):
+                total += len(message.split())
+        return total
+
+    def _config_int(self, attr: str, default: int) -> int:
+        if self.config_context is None:
+            return default
+        return int(getattr(self.config_context.config, attr, default) or default)
+
+    def _config_float(self, attr: str, default: float) -> float:
+        if self.config_context is None:
+            return default
+        return float(getattr(self.config_context.config, attr, default) or default)
+
+    def _force_compact_history(self) -> str:
+        before = len(self.session_context.transcript)
+        self._compress_full_history()
+        after = len(self.session_context.transcript)
+        return f"Compacted history from {before} entries to {after}."
+
     @staticmethod
     def _handle_help(app: CLIApp, _args: list[str]) -> CommandResponse:
         lines = [f"/{cmd.name}	{cmd.help_text}" for cmd in app.command_router.available_commands()]
@@ -335,11 +645,43 @@ class CLIApp:
             metadata.spend_amount = amount
             return CommandResponse(messages=[("system", f"Session spend set to {metadata.spend_amount:.2f} SOL.")])
 
+        if subcommand.lower() == "model":
+            if not values:
+                return CommandResponse(
+                    messages=[("system", "Usage: /settings model <gpt-5|gpt-5-codex>")],
+                )
+            choice = values[0].strip().lower()
+            allowed_models = {"gpt-5", "gpt-5-codex"}
+            if choice not in allowed_models:
+                return CommandResponse(
+                    messages=[(
+                        "system",
+                        "Supported models: gpt-5, gpt-5-codex.",
+                    )]
+                )
+            canonical_choice = "gpt-5-codex" if choice == "gpt-5-codex" else "gpt-5"
+            app._update_llm_settings(model=canonical_choice)
+            return CommandResponse(messages=[("system", f"LLM model updated to {canonical_choice}.")])
+
+        if subcommand.lower() in {"reasoning", "effort"}:
+            if not values:
+                return CommandResponse(
+                    messages=[("system", "Usage: /settings reasoning <low|medium|high>")],
+                )
+            choice = values[0].strip().lower()
+            allowed_efforts = {"low", "medium", "high"}
+            if choice not in allowed_efforts:
+                return CommandResponse(
+                    messages=[("system", "Reasoning effort must be one of: low, medium, high.")]
+                )
+            app._update_llm_settings(reasoning=choice)
+            return CommandResponse(messages=[("system", f"Reasoning effort set to {choice}.")])
+
         return CommandResponse(
             messages=[
                 (
                     "system",
-                    "Unknown settings option. Use `/settings`, `/settings wallet <value>`, or `/settings spend <amount>`.",
+                    "Unknown settings option. Use `/settings`, `/settings wallet <value>`, `/settings spend <amount>`, `/settings model <gpt-5|gpt-5-codex>`, or `/settings reasoning <low|medium|high>`.",
                 )
             ]
         )
@@ -379,6 +721,9 @@ class CLIApp:
 
             content = CLIApp._format_export_text(export_data)
             return CommandResponse(messages=[("system", content)], tool_calls=tool_summary)
+        if command.lower() == "compact":
+            summary = app._force_compact_history()
+            return CommandResponse(messages=[("system", summary)])
 
         return CommandResponse(messages=[("system", "Unknown session command. Try `/session export <id>`.")])
 
@@ -603,8 +948,17 @@ class CLIApp:
             f"{metadata.wallet_balance:.3f} SOL" if metadata.wallet_balance is not None else "--"
         )
         spend_display = f"{metadata.spend_amount:.2f} SOL"
+        input_limit = self._config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
+        recent_input = metadata.llm_last_input_tokens or 0
+        percent_input = min((recent_input / input_limit * 100) if input_limit else 0.0, 100.0)
+        output_total = metadata.llm_output_tokens or 0
+        tokens_display = (
+            f"ctx in last {recent_input:,}/{input_limit:,} ({percent_input:.1f}%) • "
+            f"out total {output_total:,}"
+        )
         status = Text(
-            f"Session: {session_id} • Project: {project_display} • Wallet: {wallet_display} • Balance: {balance_display} • Spend: {spend_display}",
+            f"Session: {session_id} • Project: {project_display} • Wallet: {wallet_display} • "
+            f"Balance: {balance_display} • Spend: {spend_display} • Tokens: {tokens_display}",
             style="dim",
         )
         self.console.print(status)

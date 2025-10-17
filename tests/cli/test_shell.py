@@ -15,6 +15,7 @@ StubLLM = cli_app_module.StubLLM
 from solcoder.session import SessionManager
 from solcoder.solana import WalletManager
 from solcoder.core.env_diag import DiagnosticResult
+from solcoder.core.config import ConfigContext, ConfigManager, SolCoderConfig
 
 
 class RPCStub:
@@ -51,6 +52,11 @@ def session_bundle(
     return manager, context, wallet_manager, rpc_stub
 
 
+@pytest.fixture()
+def config_context() -> ConfigContext:
+    return ConfigContext(config=SolCoderConfig(), llm_api_key="dummy-key", passphrase="pass")
+
+
 def test_help_command_bypasses_llm(
     console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
 ) -> None:
@@ -73,7 +79,9 @@ def test_help_command_bypasses_llm(
 
 
 def test_chat_message_invokes_llm(
-    console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
 ) -> None:
     manager, context, wallet_manager, rpc_stub = session_bundle
     llm = StubLLM()
@@ -84,6 +92,7 @@ def test_chat_message_invokes_llm(
         session_context=context,
         wallet_manager=wallet_manager,
         rpc_client=rpc_stub,
+        config_context=config_context,
     )
 
     response = app.handle_line("hello solcoder")
@@ -91,6 +100,14 @@ def test_chat_message_invokes_llm(
     assert llm.calls == ["hello solcoder"]
     assert response.continue_loop is True
     assert response.messages and response.messages[0][0] == "agent"
+    assert response.rendered_roles == {"agent"}
+    assert response.tool_calls and response.tool_calls[0]["type"] == "llm"
+    assert response.tool_calls[0]["status"] == "cached"
+    assert response.tool_calls[0]["reasoning_effort"] == config_context.config.llm_reasoning_effort
+    assert context.metadata.llm_input_tokens > 0
+    assert context.metadata.llm_output_tokens > 0
+    assert context.metadata.llm_last_input_tokens > 0
+    assert context.metadata.llm_last_output_tokens > 0
     state_path = manager.root / context.metadata.session_id / "state.json"
     assert "hello solcoder" in state_path.read_text()
 
@@ -155,6 +172,119 @@ def test_settings_sets_spend(
     state_path = manager.root / context.metadata.session_id / "state.json"
     persisted = json.loads(state_path.read_text())
     assert persisted["metadata"]["spend_amount"] == 0.75
+
+
+def test_settings_updates_model(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    llm = StubLLM()
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+    )
+
+    response = app.handle_line("/settings model gpt-5")
+
+    assert any("LLM model updated" in message for _, message in response.messages)
+    assert config_context.config.llm_model == "gpt-5"
+    assert llm.model == "gpt-5"
+
+
+def test_settings_updates_reasoning(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    llm = StubLLM()
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+    )
+
+    response = app.handle_line("/settings reasoning high")
+
+    assert any("Reasoning effort set" in message for _, message in response.messages)
+    assert config_context.config.llm_reasoning_effort == "high"
+    assert llm.reasoning_effort == "high"
+
+
+def test_session_compact_command(
+    console: Console,
+    tmp_path: Path,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    config_context.config.history_max_messages = 6
+    config_context.config.history_summary_keep = 2
+    config_context.config.history_summary_max_words = 50
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    llm = StubLLM()
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+        config_manager=ConfigManager(config_dir=tmp_path / "cfg"),
+    )
+
+    for i in range(6):
+        app._record("user", f"user-msg-{i}")
+        app._record("agent", f"agent-msg-{i}")
+
+    response = app.handle_line("/session compact")
+
+    assert any("Compacted history" in message for _, message in response.messages)
+    assert len(context.transcript) == 4
+    assert context.transcript[0]["role"] == "system"
+    assert context.transcript[0].get("summary") is True
+    assert context.transcript[-1]["message"].startswith("Compacted history")
+
+
+def test_settings_persist_to_config(
+    console: Console,
+    tmp_path: Path,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+) -> None:
+    config_dir = tmp_path / "config"
+    manager = ConfigManager(config_dir=config_dir)
+    context = manager.ensure(interactive=False, llm_api_key="secret", passphrase="pass")
+
+    session_manager, session_context, wallet_manager, rpc_stub = session_bundle
+    llm = StubLLM()
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        config_context=context,
+        config_manager=manager,
+        session_manager=session_manager,
+        session_context=session_context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    app.handle_line("/settings model gpt-5")
+    app.handle_line("/settings reasoning high")
+
+    reloaded = manager.ensure(interactive=False, passphrase="pass")
+    assert reloaded.config.llm_model == "gpt-5"
+    assert reloaded.config.llm_reasoning_effort == "high"
 
 
 def test_settings_summary(

@@ -39,6 +39,15 @@ SolCoder is a CLI-first AI coding agent that scaffolds, deploys, and funds Solan
 - `poetry run solcoder --help` — inspect CLI flags and modes.
 - `poetry run solcoder --dry-run-llm` — hit the live LLM once to confirm streaming before running full workflows.
 
+## LLM Configuration
+- The CLI now targets OpenAI's Responses API by default (`gpt-5-codex`).
+- SolCoder stores provider defaults under `~/.solcoder/config.toml`; run `poetry run solcoder` once to walk through the setup wizard.
+- Override provider settings per run with CLI flags such as `--llm-provider`, `--llm-base-url`, `--llm-model`, and `--llm-api-key`.
+- Select the reasoning effort with `--llm-reasoning <low|medium|high>` (defaults to `medium`) or adjust on the fly via `/settings reasoning <level>`.
+- Switch between `gpt-5-codex` and `gpt-5` at runtime using `/settings model <gpt-5|gpt-5-codex>`.
+- Use `--offline-mode` to fall back to deterministic stubbed replies (handy for demos without network access).
+- Combine overrides with `--dry-run-llm` to smoke test connectivity before launching the full REPL.
+
 ## Project Layout
 - `src/solcoder/cli/` — Prompt Toolkit REPL, command router, and UI widgets.
 - `src/solcoder/core/` — shared services (config, session state, logging, tool orchestration).

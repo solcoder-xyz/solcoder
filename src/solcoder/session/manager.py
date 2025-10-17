@@ -19,7 +19,10 @@ def _default_root() -> Path:
 
 DEFAULT_ROOT = _default_root()
 MAX_SESSIONS = 20
-TRANSCRIPT_LIMIT = 20
+# Upper bound enforced when persisting session transcripts. Set high so
+# higher-level history management (configurable in CLI) can control
+# summarisation thresholds without being truncated here.
+TRANSCRIPT_LIMIT = 1000
 
 
 class SessionLoadError(RuntimeError):
@@ -34,6 +37,11 @@ class SessionMetadata(BaseModel):
     wallet_status: str | None = None
     spend_amount: float = 0.0
     wallet_balance: float | None = None
+    llm_input_tokens: int = 0
+    llm_output_tokens: int = 0
+    llm_last_input_tokens: int = 0
+    llm_last_output_tokens: int = 0
+    compression_cooldown: int = 0
 
 
 @dataclass
