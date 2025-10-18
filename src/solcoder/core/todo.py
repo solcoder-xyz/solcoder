@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import itertools
+import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal
 
 
+TRAILING_PUNCTUATION = ".,;:!?"
+
+
 def _normalize_title(title: str) -> str:
-    return " ".join(title.strip().split()).lower()
+    collapsed = re.sub(r"\s+", " ", title.strip())
+    stripped = collapsed.rstrip(TRAILING_PUNCTUATION)
+    return stripped.lower()
 
 
 def _is_management_task(normalized_title: str) -> bool:

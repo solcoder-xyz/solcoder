@@ -261,8 +261,8 @@ def test_agent_requires_plan_when_todo_exists(
     response = app.handle_line("work todo")
 
     assert llm.script == []
-    assert len(app.todo_manager.tasks()) == 1
-    assert app.todo_manager.tasks()[0].title == "Finish docs"
+    titles = [task.title for task in app.todo_manager.tasks()]
+    assert "Finish docs" in titles
     assert any("TODO List" in message for _, message in response.messages)
 
 
@@ -583,7 +583,10 @@ def test_todo_command_add_and_complete(
     assert "[x]" in complete_response.messages[0][1]
 
     plan_response = app.handle_line("hello solcoder")
-    assert not app.todo_manager.tasks()
+    titles = [task.title for task in app.todo_manager.tasks()]
+    assert "Write docs" in titles
+    done_task = next(task for task in app.todo_manager.tasks() if task.title == "Write docs")
+    assert done_task.status == "done"
     assert any("TODO List" in message for _, message in plan_response.messages)
 
 

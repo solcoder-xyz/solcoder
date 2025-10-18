@@ -17,7 +17,7 @@ from solcoder.core import (
     manifest_to_prompt_section,
     parse_agent_directive,
 )
-from solcoder.core.todo import TodoManager
+from solcoder.core.todo import TodoManager, _normalize_title as _todo_normalize_title
 from solcoder.core.tool_registry import ToolRegistry, ToolRegistryError
 from solcoder.session import SessionMetadata
 
@@ -123,20 +123,26 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
         tasks = ctx.todo_manager.tasks()
         if not tasks:
             return False
-        normalized_step = step_title.strip().lower() if step_title else None
-        target = None
-        for task in tasks:
-            if task.status == "done":
-                continue
-            if normalized_step and normalized_step in task.title.lower():
-                target = task
-                break
-        if target is None:
-            for task in tasks:
-                if task.status != "done":
-                    target = task
-                    break
-        if target is None:
+        open_tasks = [task for task in tasks if task.status != "done"]
+        if not open_tasks:
+            return False
+        if not step_title:
+            return False
+        needle = step_title.strip().lower()
+        contains = [task for task in open_tasks if needle in task.title.lower()]
+        equals = [task for task in open_tasks if task.title.strip().lower() == needle]
+        if len(equals) == 1:
+            target = equals[0]
+        elif len(contains) == 1:
+            target = contains[0]
+        else:
+            hint = (
+                "Multiple TODO items match this step; please update the specific task manually.\n"
+                f"{ctx.todo_manager.render()}"
+            )
+            display_messages.append(("system", hint))
+            ctx.render_message("system", hint)
+            rendered_roles.add("system")
             return False
         try:
             ctx.todo_manager.mark_complete(target.id, expected_revision=ctx.todo_manager.revision)
@@ -153,30 +159,25 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
         return True
 
     def _bootstrap_plan_into_todo(steps: list[str] | None) -> bool:
-        if ctx.todo_manager is None:
+        if ctx.todo_manager is None or not steps:
             return False
         existing_tasks = ctx.todo_manager.tasks()
-        if existing_tasks:
-            todo_render = ctx.todo_manager.render()
-            display_messages.append(("agent", todo_render))
-            ctx.render_message("agent", todo_render)
-            rendered_roles.add("agent")
-            return True
-        if not steps:
-            return False
-        existing_titles = {task.title.strip().lower() for task in existing_tasks}
+        existing_titles = {_todo_normalize_title(task.title) for task in existing_tasks}
         added = False
         for step in steps:
             if not step or not step.strip():
                 continue
-            normalized = step.strip()
-            if normalized.lower() in existing_titles:
+            normalized_title = _todo_normalize_title(step)
+            if normalized_title in existing_titles:
                 continue
             try:
-                ctx.todo_manager.create_task(normalized)
+                ctx.todo_manager.create_task(
+                    step.strip(),
+                    expected_revision=ctx.todo_manager.revision,
+                )
             except ValueError:
                 continue
-            existing_titles.add(normalized.lower())
+            existing_titles.add(normalized_title)
             added = True
         if not existing_tasks and not added:
             return False
@@ -207,7 +208,14 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
             rendered_roles.add("system")
             ctx.todo_manager.acknowledge()
         else:
-            ctx.todo_manager.clear()
+            summary = (
+                "All TODO items are complete. 🎉\n"
+                f"{ctx.todo_manager.render()}\n"
+                "Tip: Run `/todo clear` to reset the list when you are ready to start fresh."
+            )
+            display_messages.append(("system", summary))
+            ctx.render_message("system", summary)
+            rendered_roles.add("system")
 
     with ctx.console.status(status_message, spinner="dots") as status_indicator:
         try:

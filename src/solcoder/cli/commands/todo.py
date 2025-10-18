@@ -10,7 +10,16 @@ if TYPE_CHECKING:  # pragma: no cover
     from solcoder.cli.app import CLIApp
 
 
-USAGE = "Usage: /todo <add|update|done|remove|list|clear> [...options]"
+USAGE = (
+    "Usage: /todo <add|update|done|remove|list|clear|confirm> [...options]\n"
+    "Examples:\n"
+    "  /todo add Fix bug --desc 'repro steps'\n"
+    "  /todo update T1 --title 'Refactor' --status done\n"
+    "  /todo done T2\n"
+    "  /todo confirm"
+)
+
+ALLOWED_STATUS = {"todo", "done"}
 
 
 def register(app: CLIApp, router: CommandRouter) -> None:
@@ -32,7 +41,8 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         if action in {"remove", "delete"}:
             return _handle_remove(app, remainder)
         if action == "list":
-            return CommandResponse(messages=[("system", app.todo_manager.render())])
+            render = app.todo_manager.render()
+            return CommandResponse(messages=[("system", render)])
         if action == "clear":
             app.todo_manager.clear(expected_revision=app.todo_manager.revision)
             return CommandResponse(messages=[("system", "TODO list cleared.\n" + app.todo_manager.render())])
@@ -45,9 +55,12 @@ def register(app: CLIApp, router: CommandRouter) -> None:
 
 
 def _handle_add(app: "CLIApp", args: list[str]) -> CommandResponse:
-    title, description = _parse_title_and_description(args)
+    try:
+        title, description = _parse_title_and_description(args)
+    except ValueError as exc:
+        return CommandResponse(messages=[("system", str(exc))])
     if not title:
-        return CommandResponse(messages=[("system", "TODO add requires a title. Try `/todo add Fix bug --desc='details'`.")])
+        return CommandResponse(messages=[("system", "TODO add requires a non-empty title. Try `/todo add Fix bug --desc 'details'`.")])
     try:
         task = app.todo_manager.create_task(
             title,
@@ -62,9 +75,12 @@ def _handle_add(app: "CLIApp", args: list[str]) -> CommandResponse:
 
 def _handle_update(app: "CLIApp", args: list[str]) -> CommandResponse:
     if not args:
-        return CommandResponse(messages=[("system", "TODO update requires a task id." )])
+        return CommandResponse(messages=[("system", "TODO update requires a task id.")])
     task_id = args[0]
-    updates = _extract_updates(args[1:])
+    try:
+        updates = _extract_updates(args[1:])
+    except ValueError as exc:
+        return CommandResponse(messages=[("system", str(exc))])
     if not updates:
         return CommandResponse(messages=[("system", "Provide at least one field to update (title, --desc, --status).")])
     try:
@@ -110,35 +126,56 @@ def _parse_title_and_description(args: list[str]) -> tuple[str, str | None]:
     description: str | None = None
     it = iter(args)
     for token in it:
-        if token.startswith("--desc="):
+        if token in {"--desc", "--description"}:
+            value = next(it, None)
+            if value is None or value.startswith("--"):
+                raise ValueError("Missing value for --desc.")
+            description = value
+        elif token.startswith("--desc=") or token.startswith("--description="):
             description = token.split("=", 1)[1]
-        elif token == "--desc":
-            description = next(it, "")
         else:
             title_parts.append(token)
     title = " ".join(title_parts).strip()
-    return title, (description.strip() if description else None)
+    if description is not None:
+        description = description.strip()
+    return title, (description if description else None)
 
 
 def _extract_updates(args: list[str]) -> dict[str, str | None]:
     updates: dict[str, str | None] = {}
     it = iter(args)
     for token in it:
-        if token.startswith("--title="):
+        if token in {"--title", "-t"}:
+            value = next(it, None)
+            if value is None or value.startswith("--"):
+                raise ValueError("Missing value for --title.")
+            updates["title"] = value
+        elif token.startswith("--title="):
             updates["title"] = token.split("=", 1)[1]
-        elif token == "--title":
-            updates["title"] = next(it, "")
-        elif token.startswith("--desc="):
+        elif token in {"--desc", "--description", "-d"}:
+            value = next(it, None)
+            if value is None or value.startswith("--"):
+                raise ValueError("Missing value for --desc.")
+            updates["description"] = value
+        elif token.startswith("--desc=") or token.startswith("--description="):
             updates["description"] = token.split("=", 1)[1]
-        elif token == "--desc":
-            updates["description"] = next(it, "")
+        elif token == "--status":
+            value = next(it, None)
+            if value is None or value.startswith("--"):
+                raise ValueError("Missing value for --status.")
+            updates["status"] = value
         elif token.startswith("--status="):
             updates["status"] = token.split("=", 1)[1]
-        elif token == "--status":
-            updates["status"] = next(it, "")
-    if "status" in updates and updates["status"] is not None:
-        updates["status"] = updates["status"].strip().lower()
-    return updates
+    if updates.get("title") is not None:
+        updates["title"] = updates["title"].strip() or None
+    if updates.get("description") is not None:
+        updates["description"] = updates["description"].strip()
+    if updates.get("status") is not None:
+        status = updates["status"].strip().lower()
+        if status not in ALLOWED_STATUS:
+            raise ValueError(f"Invalid status '{status}'. Allowed values: {', '.join(sorted(ALLOWED_STATUS))}.")
+        updates["status"] = status
+    return {key: value for key, value in updates.items() if value is not None}
 
 
 __all__ = ["register"]
