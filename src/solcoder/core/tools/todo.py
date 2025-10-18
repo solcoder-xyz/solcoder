@@ -45,8 +45,13 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         if extra:
             data.update(extra)
         if data["revision_mismatch"]:
-            data["show_todo_list"] = True
-        return ToolResult(content=content, summary=summary, data=data)
+            show = True
+        data["show_todo_list"] = show
+        data["event"] = content
+        rendered_content = content
+        if show:
+            rendered_content = manager.render()
+        return ToolResult(content=rendered_content, summary=summary, data=data)
 
     def _create(payload: dict[str, Any]) -> ToolResult:
         title = payload.get("title")
@@ -58,6 +63,7 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         except ValueError as exc:
             todo_render = manager.render()
             raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
+        show = _bool_flag(payload, "show_todo_list", default=False) or task.status == "in_progress"
         return _result(
             f"Task '{task.title}' added (id: {task.id}).",
             summary=f"Task added: {task.id}",
@@ -84,6 +90,7 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         except ValueError as exc:
             todo_render = manager.render()
             raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
+        show = show or fields.get("status") == "in_progress" or task.status == "in_progress"
         return _result(
             f"Task '{task.id}' updated.",
             summary=f"Task updated: {task.id}",
@@ -101,6 +108,7 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         except ValueError as exc:
             todo_render = manager.render()
             raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
+        show = True
         return _result(
             f"Task '{task.id}' marked complete.",
             summary=f"Task completed: {task.id}",
@@ -118,6 +126,7 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         except ValueError as exc:
             todo_render = manager.render()
             raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
+        show = _bool_flag(payload, "show_todo_list", default=False) or bool(manager.tasks())
         return _result(
             f"Task '{task_id}' removed.",
             summary=f"Task removed: {task_id}",
@@ -128,7 +137,7 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         task_id = payload.get("task_id")
         if not task_id:
             raise ToolInvocationError("Field 'task_id' is required.")
-        show = _bool_flag(payload, "show_todo_list", default=True)
+        show = True
         expected_rev = payload.get("if_match", manager.revision)
         try:
             task = manager.set_active(task_id, expected_revision=expected_rev)

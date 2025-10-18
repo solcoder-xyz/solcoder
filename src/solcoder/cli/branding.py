@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from rich import box
-from rich.console import Console
+from rich.console import Console, RenderableType
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
@@ -235,7 +235,7 @@ def create_semantic_panel(
     )
 
 
-def create_todo_panel(tasks: list[dict[str, Any]]) -> Panel:
+def create_todo_panel(tasks: list[dict[str, Any]]) -> RenderableType:
     """Create a modern Rich panel for displaying the TODO list.
 
     Args:
@@ -248,14 +248,7 @@ def create_todo_panel(tasks: list[dict[str, Any]]) -> Panel:
     from rich.table import Table
 
     if not tasks:
-        empty_text = Text("✨ All clear! No pending tasks.", style="dim italic solcoder.text.secondary")
-        return Panel(
-            empty_text,
-            title="[solcoder.todo.border]📋 TODO List[/]",
-            border_style="solcoder.todo.border",
-            box=box.ROUNDED,
-            padding=(1, 2),
-        )
+        return Text("✨ All clear! No pending tasks.", style="dim italic solcoder.text.secondary")
 
     # Count lifecycle breakdown
     active = sum(1 for t in tasks if t.get("status") == "in_progress")
@@ -293,7 +286,7 @@ def create_todo_panel(tasks: list[dict[str, Any]]) -> Panel:
             icon = Text("⚡", style="solcoder.todo.progress")
             title_style = "bold solcoder.text.primary"
         else:
-            icon = Text("⬜", style="solcoder.todo.pending")
+            icon = Text("•", style="solcoder.todo.pending")
             title_style = "solcoder.text.primary"
 
         # Format title with description if present
