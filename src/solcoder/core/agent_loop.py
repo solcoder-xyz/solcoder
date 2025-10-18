@@ -228,24 +228,44 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                 _accumulate_usage(result)
 
                 if not plan_received:
-                    if directive.type != "plan":
-                        pending_prompt = json.dumps(
-                            {
-                                "type": "error",
-                                "message": "First response must use type='plan' with steps.",
-                            }
-                        )
+                    if directive.type == "plan":
+                        plan_received = True
+                        auto_rendered = _bootstrap_plan_into_todo(directive.steps)
+                        if not auto_rendered:
+                            plan_text = _format_plan_message(directive.steps or [], directive.message)
+                            display_messages.append(("agent", plan_text))
+                            ctx.render_message("agent", plan_text)
+                            rendered_roles.add("agent")
+                        if directive.steps:
+                            status_message = f"[cyan]{directive.steps[0]}[/cyan]"
+                        pending_prompt = AGENT_PLAN_ACK
                         continue
-                    plan_received = True
-                    auto_rendered = _bootstrap_plan_into_todo(directive.steps)
-                    if not auto_rendered:
-                        plan_text = _format_plan_message(directive.steps or [], directive.message)
-                        display_messages.append(("agent", plan_text))
-                        ctx.render_message("agent", plan_text)
+                    if directive.type == "reply":
+                        final_message = directive.message or ""
+                        if directive.step_title:
+                            final_message = f"{directive.step_title}\n{final_message}"
+                        display_messages.append(("agent", final_message))
+                        ctx.render_message("agent", final_message)
                         rendered_roles.add("agent")
-                    if directive.steps:
-                        status_message = f"[cyan]{directive.steps[0]}[/cyan]"
-                    pending_prompt = AGENT_PLAN_ACK
+                        status_message = "[cyan]Thinking…[/cyan]"
+                        _handle_completion_todo()
+                        break
+                    if directive.type == "cancel":
+                        cancel_message = directive.message or "Agent cancelled the request."
+                        display_messages.append(("system", cancel_message))
+                        ctx.render_message("system", cancel_message)
+                        rendered_roles.add("system")
+                        status_message = "[cyan]Thinking…[/cyan]"
+                        _handle_completion_todo()
+                        break
+                    pending_prompt = json.dumps(
+                        {
+                            "type": "error",
+                            "message": (
+                                "First response must be a plan for multi-step work or a direct reply when a single answer suffices."
+                            ),
+                        }
+                    )
                     continue
 
                 if directive.type == "plan":
@@ -401,8 +421,9 @@ def _agent_system_prompt(config_context: ConfigContext | None, manifest_json: st
         "outside the JSON value. Use compact JSON without extra commentary.\n\n"
         f"{schema_description}"
         "Rules:\n"
-        "1. The very first response for each new user message MUST be a plan directive "
-        '   with {"type":"plan","steps":[...]} describing the intended workflow.\n'
+        "1. If a prompt can be satisfied immediately without tools or multi-step work, respond "
+        '   directly with {"type":"reply","message":...}. Otherwise begin with '
+        '{"type":"plan","steps":[...]} describing the intended workflow.\n'
         "2. When you need to run a tool, reply with "
         '{"type":"tool_request","step_title":...,"tool":{"name":...,"args":{...}}}. '
         "Keep arguments strictly within the declared schema.\n"

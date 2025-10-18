@@ -207,6 +207,35 @@ def test_chat_message_invokes_llm(
     assert "hello solcoder" in state_path.read_text()
 
 
+def test_agent_can_reply_without_plan(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    script = [
+        {"expect": expect_equals("quick hello"), "reply": {"type": "reply", "message": "Hello there!"}},
+    ]
+    llm = ScriptedLLM(script)
+
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    response = app.handle_line("quick hello")
+
+    assert llm.script == []
+    assert llm.calls == ["quick hello"]
+    assert response.messages[0][0] == "agent"
+    assert "Hello there" in response.messages[0][1]
+    assert not app.todo_manager.tasks()
+    assert response.tool_calls[0]["type"] == "llm"
+
+
 def test_agent_loop_runs_tool(
     console: Console,
     session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
