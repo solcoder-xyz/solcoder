@@ -190,9 +190,12 @@ def test_chat_message_invokes_llm(
     plan_message = response.messages[0][1]
     assert "TODO List" in plan_message
     assert "Consider the request" in plan_message
-    assert response.messages[-1][0] == "agent"
-    assert "[stub] Completed request" in response.messages[-1][1]
-    assert response.rendered_roles == {"agent"}
+    assert response.messages[-2][0] == "agent"
+    assert "[stub] Completed request" in response.messages[-2][1]
+    assert response.messages[-1][0] == "system"
+    assert "unfinished items" in response.messages[-1][1]
+    assert response.rendered_roles == {"agent", "system"}
+    assert any(task.status == "todo" for task in app.todo_manager.tasks())
     assert response.tool_calls and response.tool_calls[0]["type"] == "llm"
     assert response.tool_calls[0]["status"] == "cached"
     assert response.tool_calls[0]["reasoning_effort"] == config_context.config.llm_reasoning_effort
@@ -287,11 +290,14 @@ def test_agent_loop_recovers_from_invalid_json(
     response = app.handle_line("walk me through")
 
     assert llm.script == []
-    assert all(role != "system" for role, _ in response.messages)
+    assert any(role == "system" for role, _ in response.messages)
     assert response.messages[0][0] == "agent"
     assert "TODO List" in response.messages[0][1]
     assert "Retry step" in response.messages[0][1]
-    assert response.messages[-1][1].startswith("Recovered")
+    assert response.messages[-2][1].startswith("Recovered")
+    assert response.messages[-1][0] == "system"
+    assert "unfinished items" in response.messages[-1][1]
+    assert any(task.status == "todo" for task in app.todo_manager.tasks())
 
 
 def test_agent_loop_reports_invalid_json_twice(

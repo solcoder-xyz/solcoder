@@ -127,6 +127,25 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
         rendered_roles.add("agent")
         return True
 
+    def _handle_completion_todo() -> None:
+        if ctx.todo_manager is None:
+            return
+        tasks = ctx.todo_manager.tasks()
+        if not tasks:
+            return
+        remaining = [task for task in tasks if task.status != "done"]
+        if remaining:
+            reminder = (
+                "TODO list still has unfinished items.\n"
+                f"{ctx.todo_manager.render()}\n"
+                "Use `/todo done <id>` to complete items or `/todo clear` to remove them."
+            )
+            display_messages.append(("system", reminder))
+            ctx.render_message("system", reminder)
+            rendered_roles.add("system")
+        else:
+            ctx.todo_manager.clear()
+
     with ctx.console.status(status_message, spinner="dots") as status_indicator:
         try:
             while iteration < ctx.max_iterations:
@@ -273,9 +292,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                     display_messages.append(("agent", final_message))
                     ctx.render_message("agent", final_message)
                     rendered_roles.add("agent")
-                    if ctx.todo_manager is not None:
-                        ctx.todo_manager.clear()
                     status_message = "[cyan]Thinking…[/cyan]"
+                    _handle_completion_todo()
                     break
 
                 if directive.type == "cancel":
@@ -283,9 +301,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                     display_messages.append(("system", cancel_message))
                     ctx.render_message("system", cancel_message)
                     rendered_roles.add("system")
-                    if ctx.todo_manager is not None:
-                        ctx.todo_manager.clear()
                     status_message = "[cyan]Thinking…[/cyan]"
+                    _handle_completion_todo()
                     break
         except KeyboardInterrupt:
             cancelled = True
