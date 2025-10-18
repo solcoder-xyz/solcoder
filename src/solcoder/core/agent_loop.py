@@ -71,6 +71,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     last_finish_reason: str | None = None
     all_cached = True
     retry_payload: str | None = None
+    todo_render_revision = -1
     should_exit = False
 
     provider_name, model_name, reasoning_effort = _active_model_details(
@@ -118,9 +119,17 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         todo_render = payload.get("todo_render")
         if not isinstance(todo_render, str) or not todo_render.strip():
             return
+        revision = payload.get("revision")
+        if revision is None and ctx.todo_manager is not None:
+            revision = ctx.todo_manager.revision
+        nonlocal todo_render_revision
+        if revision is not None and revision == todo_render_revision:
+            return
         display_messages.append(("agent", todo_render))
         ctx.render_message("agent", todo_render)
         rendered_roles.add("agent")
+        if revision is not None:
+            todo_render_revision = revision
 
     def _append_todo_instruction(step_title: str | None = None) -> None:
         if ctx.todo_manager is None:
@@ -198,6 +207,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         payload = {
             "show_todo_list": True,
             "todo_render": ctx.todo_manager.render(),
+            "revision": ctx.todo_manager.revision,
         }
         _maybe_render_todo(payload)
 
@@ -318,6 +328,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             ctx.render_message("agent", plan_text)
                             rendered_roles.add("agent")
                         _append_active_summary()
+                        _show_current_todo_panel()
                         if directive.steps:
                             status_message = Text(
                                 directive.steps[0], style="solcoder.status.text"
@@ -388,6 +399,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         ctx.render_message("agent", plan_text)
                         rendered_roles.add("agent")
                     _append_active_summary()
+                    _show_current_todo_panel()
                     if directive.steps:
                         status_message = Text(
                             directive.steps[0], style="solcoder.status.text"
@@ -428,6 +440,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         rendered_roles.add("agent")
                     _maybe_render_todo(payload_data)
                     _append_active_summary()
+                    _show_current_todo_panel()
 
                     if isinstance(payload_data, dict) and payload_data.get("exit_app"):
                         should_exit = True
@@ -480,6 +493,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     ctx.render_message("agent", final_message)
                     rendered_roles.add("agent")
                     _append_active_summary()
+                    _show_current_todo_panel()
                     status_message = Text("Thinking…", style="solcoder.status.text")
                     _handle_completion_todo()
                     break
