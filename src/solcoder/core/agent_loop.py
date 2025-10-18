@@ -41,6 +41,7 @@ class AgentLoopContext:
     session_metadata: SessionMetadata
     render_message: Callable[[str, str], None]
     todo_manager: TodoManager | None = None
+    initial_todo_message: str | None = None
     max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS
 
 
@@ -53,6 +54,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
     system_prompt = _agent_system_prompt(ctx.config_context, manifest_json)
 
     loop_history = list(ctx.history)
+    if ctx.initial_todo_message:
+        loop_history.append({"role": "system", "content": ctx.initial_todo_message})
     pending_prompt = ctx.prompt
     plan_received = False
     rendered_roles: set[str] = set()

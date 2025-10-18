@@ -177,6 +177,7 @@ class CLIApp:
             session_metadata=self.session_context.metadata,
             render_message=self._render_message,
             todo_manager=self.todo_manager,
+            initial_todo_message=self._todo_history_snapshot(),
             max_iterations=self._max_agent_iterations(),
         )
         try:
@@ -284,6 +285,16 @@ class CLIApp:
 
     def _fetch_balance(self, public_key: str | None) -> float | None:
         return fetch_balance(self.rpc_client, public_key)
+
+    def _todo_history_snapshot(self) -> str | None:
+        if not self.todo_manager or not self.todo_manager.tasks():
+            return None
+        todo_render = self.todo_manager.render()
+        guidance = (
+            "Update the TODO list with todo_* tools or the /todo command as work progresses. "
+            "Only add new steps that are not already present."
+        )
+        return f"{todo_render}\n{guidance}"
 
     def _write_secret_file(self, target: Path, secret: str) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
