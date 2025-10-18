@@ -11,15 +11,16 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 USAGE = (
-    "Usage: /todo <add|update|done|remove|list|clear|confirm> [...options]\n"
+    "Usage: /todo <add|update|start|done|remove|list|clear|confirm> [...options]\n"
     "Examples:\n"
     "  /todo add Fix bug --desc 'repro steps'\n"
-    "  /todo update T1 --title 'Refactor' --status done\n"
+    "  /todo update T1 --title 'Refactor' --status in_progress\n"
+    "  /todo start T2\n"
     "  /todo done T2\n"
     "  /todo confirm"
 )
 
-ALLOWED_STATUS = {"todo", "done"}
+ALLOWED_STATUS = {"pending", "in_progress", "done"}
 
 
 def register(app: CLIApp, router: CommandRouter) -> None:
@@ -40,6 +41,8 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             return _handle_done(app, remainder)
         if action in {"remove", "delete"}:
             return _handle_remove(app, remainder)
+        if action in {"start", "activate", "focus"}:
+            return _handle_start(app, remainder)
         if action == "list":
             render = app.todo_manager.render()
             return CommandResponse(messages=[("system", render)])
@@ -106,6 +109,18 @@ def _handle_done(app: "CLIApp", args: list[str]) -> CommandResponse:
     except ValueError as exc:
         return CommandResponse(messages=[("system", str(exc))])
     message = [f"Task {task_id} marked complete.", "", app.todo_manager.render()]
+    return CommandResponse(messages=[("system", "\n".join(message))])
+
+
+def _handle_start(app: "CLIApp", args: list[str]) -> CommandResponse:
+    if not args:
+        return CommandResponse(messages=[("system", "TODO start requires a task id.")])
+    task_id = args[0]
+    try:
+        app.todo_manager.set_active(task_id, expected_revision=app.todo_manager.revision)
+    except ValueError as exc:
+        return CommandResponse(messages=[("system", str(exc))])
+    message = [f"Task {task_id} is now in progress.", "", app.todo_manager.render()]
     return CommandResponse(messages=[("system", "\n".join(message))])
 
 

@@ -255,14 +255,14 @@ def test_chat_message_invokes_llm(
     assert response.continue_loop is True
     assert response.messages and response.messages[0][0] == "agent"
     plan_message = response.messages[0][1]
-    assert "TODO List" in plan_message
+    assert "[[RENDER_TODO_PANEL]]" in plan_message
     assert "Consider the request" in plan_message
     assert response.messages[-2][0] == "agent"
     assert "[stub] Completed request" in response.messages[-2][1]
     assert response.messages[-1][0] == "system"
     assert "unfinished items" in response.messages[-1][1]
     assert response.rendered_roles == {"agent", "system"}
-    assert any(task.status == "todo" for task in app.todo_manager.tasks())
+    assert any(task.status != "done" for task in app.todo_manager.tasks())
     assert response.tool_calls and response.tool_calls[0]["type"] == "llm"
     assert response.tool_calls[0]["status"] == "cached"
     assert response.tool_calls[0]["reasoning_effort"] == config_context.config.llm_reasoning_effort
@@ -329,7 +329,41 @@ def test_agent_requires_plan_when_todo_exists(
 
     assert llm.script == []
     assert app.todo_manager.tasks()
-    assert any("TODO List" in message for _, message in response.messages)
+    assert any("[[RENDER_TODO_PANEL]]" in message for _, message in response.messages)
+
+
+def test_single_step_plan_isnt_bootstrapped(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    script = [
+        {
+            "expect": expect_equals("single step"),
+            "reply": {"type": "plan", "message": "One step only", "steps": ["Only step"]},
+        },
+        {
+            "expect": expect_equals(AGENT_PLAN_ACK),
+            "reply": {"type": "reply", "message": "Done"},
+        },
+    ]
+    llm = ScriptedLLM(script)
+
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    response = app.handle_line("single step")
+
+    assert llm.script == []
+    assert not app.todo_manager.tasks()
+    assert any("One step only" in message for _, message in response.messages)
+    assert all("[[RENDER_TODO_PANEL]]" not in message for _, message in response.messages)
 
 
 def test_agent_loop_runs_tool(
@@ -417,12 +451,12 @@ def test_agent_loop_recovers_from_invalid_json(
     assert llm.script == []
     assert any(role == "system" for role, _ in response.messages)
     assert response.messages[0][0] == "agent"
-    assert "TODO List" in response.messages[0][1]
+    assert "[[RENDER_TODO_PANEL]]" in response.messages[0][1]
     assert "Retry step" in response.messages[0][1]
     assert response.messages[-2][1].startswith("Recovered")
     assert response.messages[-1][0] == "system"
     assert "unfinished items" in response.messages[-1][1]
-    assert any(task.status == "todo" for task in app.todo_manager.tasks())
+    assert any(task.status != "done" for task in app.todo_manager.tasks())
 
 
 def test_agent_loop_reports_invalid_json_twice(
@@ -640,17 +674,19 @@ def test_todo_command_add_and_complete(
     )
 
     response = app.handle_line("/todo add Write docs --desc outline")
-    assert any("TODO List" in message for _, message in response.messages)
+    assert any("[[RENDER_TODO_PANEL]]" in message for _, message in response.messages)
     assert len(app.todo_manager.tasks()) == 1
     task_id = app.todo_manager.tasks()[0].id
+    assert app.todo_manager.tasks()[0].status == "in_progress"
 
     complete_response = app.handle_line(f"/todo done {task_id}")
     assert any("marked complete" in message for _, message in complete_response.messages)
-    assert "[x]" in complete_response.messages[0][1]
+    assert "[[RENDER_TODO_PANEL]]" in complete_response.messages[0][1]
+    assert app.todo_manager.tasks()[0].status == "done"
 
     plan_response = app.handle_line("hello solcoder")
     assert app.todo_manager.tasks()
-    assert any("TODO List" in message for _, message in plan_response.messages)
+    assert any("[[RENDER_TODO_PANEL]]" in message for _, message in plan_response.messages)
 
 
 def test_todo_persistence_across_sessions(

@@ -257,9 +257,10 @@ def create_todo_panel(tasks: list[dict[str, Any]]) -> Panel:
             padding=(1, 2),
         )
 
-    # Count pending and completed
-    pending = sum(1 for t in tasks if t.get("status") != "done")
-    completed = len(tasks) - pending
+    # Count lifecycle breakdown
+    active = sum(1 for t in tasks if t.get("status") == "in_progress")
+    pending = sum(1 for t in tasks if t.get("status") == "pending")
+    completed = sum(1 for t in tasks if t.get("status") == "done")
     total = len(tasks)
     progress_pct = (completed / total * 100) if total > 0 else 0
 
@@ -279,7 +280,7 @@ def create_todo_panel(tasks: list[dict[str, Any]]) -> Panel:
     table.add_column("Task", style="solcoder.text.primary")
 
     for task in tasks:
-        status = task.get("status", "todo")
+        status = task.get("status", "pending")
         task_id = task.get("id", "")
         title = task.get("title", "")
         description = task.get("description")
@@ -288,6 +289,9 @@ def create_todo_panel(tasks: list[dict[str, Any]]) -> Panel:
         if status == "done":
             icon = Text("✅", style="solcoder.todo.done")
             title_style = "dim solcoder.text.tertiary strike"
+        elif status == "in_progress":
+            icon = Text("⚡", style="solcoder.todo.progress")
+            title_style = "bold solcoder.text.primary"
         else:
             icon = Text("⬜", style="solcoder.todo.pending")
             title_style = "solcoder.text.primary"
@@ -305,10 +309,13 @@ def create_todo_panel(tasks: list[dict[str, Any]]) -> Panel:
     content = Group(progress, Text(""), table)  # Empty Text() adds spacing
 
     # Create subtitle with stats
-    subtitle = f"[solcoder.text.secondary]{pending} pending"
+    subtitle_parts = []
+    subtitle_parts.append(f"{active} active")
+    subtitle_parts.append(f"{pending} pending")
     if completed > 0:
-        subtitle += f" • {completed} completed"
-    subtitle += f" • {progress_pct:.0f}% done[/]"
+        subtitle_parts.append(f"{completed} completed")
+    subtitle_parts.append(f"{progress_pct:.0f}% done")
+    subtitle = "[solcoder.text.secondary]" + " • ".join(subtitle_parts) + "[/]"
 
     return Panel(
         content,

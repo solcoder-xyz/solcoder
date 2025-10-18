@@ -21,8 +21,28 @@ def test_todo_toolkit_add_and_show() -> None:
     )
 
     assert result.data["show_todo_list"] is True
-    assert "[ ]" in result.data["todo_render"]
+    assert result.data["todo_render"] == "[[RENDER_TODO_PANEL]]"
     assert len(result.data["tasks"]) == 1
+    assert result.data["tasks"][0]["status"] == "in_progress"
+    assert result.data["active_task_id"] == result.data["tasks"][0]["id"]
+
+    second_result = registry.invoke(
+        "todo_add_task",
+        {
+            "title": "Document feature",
+            "if_match": manager.revision,
+        },
+    )
+    second_id = second_result.data["tasks"][-1]["id"]
+    activate_result = registry.invoke(
+        "todo_set_active_task",
+        {
+            "task_id": second_id,
+            "if_match": manager.revision,
+        },
+    )
+    assert activate_result.data["active_task_id"] == second_id
+    assert manager.active_task_id == second_id
     duplicate_error = None
     try:
         registry.invoke(
@@ -44,8 +64,7 @@ def test_todo_toolkit_mark_and_clear() -> None:
     revision = add_result.data["revision"]
 
     registry.invoke("todo_mark_complete", {"task_id": task_id, "if_match": revision})
-    render = manager.render()
-    assert "[x]" in render
+    assert manager.tasks()[0].status == "done"
 
     registry.invoke("todo_clear_tasks", {"if_match": manager.revision})
     assert manager.tasks() == []

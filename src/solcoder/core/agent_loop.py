@@ -139,14 +139,17 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         loop_history.append({"role": "system", "content": instruction})
 
     def _bootstrap_plan_into_todo(steps: list[str] | None) -> bool:
-        if ctx.todo_manager is None or not steps:
+        if ctx.todo_manager is None:
+            return False
+        cleaned_steps = [step.strip() for step in steps or [] if step and step.strip()]
+        if not cleaned_steps:
             return False
         existing_tasks = ctx.todo_manager.tasks()
+        if not existing_tasks and len(cleaned_steps) < 2:
+            return False
         existing_titles = {_todo_normalize_title(task.title) for task in existing_tasks}
         added = False
-        for step in steps:
-            if not step or not step.strip():
-                continue
+        for step in cleaned_steps:
             normalized_title = _todo_normalize_title(step)
             if normalized_title in existing_titles:
                 continue

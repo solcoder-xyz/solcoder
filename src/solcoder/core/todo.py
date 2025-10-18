@@ -32,7 +32,7 @@ def _is_management_task(normalized_title: str) -> bool:
     return any(phrase in normalized_title for phrase in phrases)
 
 
-TaskStatus = Literal["todo", "done"]
+TaskStatus = Literal["pending", "in_progress", "done"]
 
 
 @dataclass(slots=True)
@@ -42,7 +42,7 @@ class TodoItem:
     id: str
     title: str
     description: str | None = None
-    status: TaskStatus = "todo"
+    status: TaskStatus = "pending"
     normalized_title: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -90,6 +90,13 @@ class TodoManager:
             normalized_title=normalized,
         )
         self._tasks.append(task)
+        if not any(
+            existing.status == "in_progress"
+            for existing in self._tasks
+            if existing is not task and existing.status != "done"
+        ):
+            task.status = "in_progress"
+        self._normalize_active_state()
         self._touch()
         return task
 
@@ -118,23 +125,33 @@ class TodoManager:
         if description is not None:
             task.description = description or None
         if status is not None:
-            if status not in ("todo", "done"):
-                raise ValueError("Task status must be 'todo' or 'done'.")
-            task.status = status
+            self._apply_status(task, status)
         self._touch()
         return task
 
     def mark_complete(self, task_id: str, *, expected_revision: int | None = None) -> TodoItem:
         self._check_revision(expected_revision)
         task = self._find_task(task_id)
-        task.status = "done"
+        self._apply_status(task, "done")
+        self._touch()
+        return task
+
+    def set_active(self, task_id: str, *, expected_revision: int | None = None) -> TodoItem:
+        self._check_revision(expected_revision)
+        task = self._find_task(task_id)
+        if task.status == "done":
+            raise ValueError("Completed tasks cannot be set active.")
+        self._set_active_task(task)
         self._touch()
         return task
 
     def remove_task(self, task_id: str, *, expected_revision: int | None = None) -> None:
         self._check_revision(expected_revision)
         task = self._find_task(task_id)
+        was_active = task.status == "in_progress"
         self._tasks.remove(task)
+        if was_active:
+            self._ensure_active_task()
         self._touch()
 
     def clear(self, *, expected_revision: int | None = None) -> None:
@@ -166,8 +183,13 @@ class TodoManager:
         if not self._tasks:
             lines.append(empty_message)
             return "\n".join(lines)
+        status_symbols = {
+            "pending": "[ ]",
+            "in_progress": "[>]",
+            "done": "[x]",
+        }
         for idx, task in enumerate(self._tasks, start=1):
-            marker = "[x]" if task.status == "done" else "[ ]"
+            marker = status_symbols.get(task.status, "[ ]")
             line = f"{idx}. {marker} {task.title}"
             if task.description:
                 line = f"{line} — {task.description}"
@@ -252,9 +274,9 @@ class TodoManager:
             description = entry.get("description")
             if description is not None:
                 description = str(description)
-            status = entry.get("status", "todo")
-            if status not in ("todo", "done"):
-                status = "todo"
+            status = entry.get("status", "pending")
+            if status not in ("pending", "in_progress", "done"):
+                status = "pending"
             todo_item = TodoItem(
                 id=task_id,
                 title=title,
@@ -275,6 +297,61 @@ class TodoManager:
         self.revision = int(state.get("revision", len(tasks)))
         self._acknowledged = bool(state.get("acknowledged", False))
         self._last_revision_mismatch = False
+        self._normalize_active_state()
+
+    def _apply_status(self, task: TodoItem, status: TaskStatus) -> None:
+        if status not in ("pending", "in_progress", "done"):
+            raise ValueError("Task status must be 'pending', 'in_progress', or 'done'.")
+        if status == task.status:
+            return
+        if status == "in_progress":
+            if task.status == "done":
+                raise ValueError("Completed tasks cannot be marked in progress.")
+            self._set_active_task(task)
+        elif status == "done":
+            task.status = "done"
+            self._ensure_active_task()
+        else:
+            task.status = "pending"
+            self._ensure_active_task()
+
+    def _set_active_task(self, task: TodoItem) -> None:
+        if task.status == "done":
+            raise ValueError("Completed tasks cannot be set active.")
+        for other in self._tasks:
+            if other.id != task.id and other.status == "in_progress":
+                other.status = "pending"
+        task.status = "in_progress"
+
+    def _ensure_active_task(self) -> None:
+        if any(task.status == "in_progress" for task in self._tasks if task.status != "done"):
+            return
+        for task in self._tasks:
+            if task.status == "pending":
+                task.status = "in_progress"
+                break
+
+    def _normalize_active_state(self) -> None:
+        active_found = False
+        for task in self._tasks:
+            if task.status == "in_progress":
+                if active_found:
+                    task.status = "pending"
+                else:
+                    active_found = True
+        if not active_found:
+            self._ensure_active_task()
+
+    def active_task(self) -> TodoItem | None:
+        for task in self._tasks:
+            if task.status == "in_progress":
+                return task
+        return None
+
+    @property
+    def active_task_id(self) -> str | None:
+        active = self.active_task()
+        return active.id if active else None
 
 
 def serialize_tasks(tasks: Iterable[TodoItem]) -> list[dict[str, Any]]:

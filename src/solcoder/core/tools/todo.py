@@ -40,6 +40,7 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
             "revision_mismatch": manager.pop_revision_mismatch(),
             "acknowledged": manager.acknowledged,
             "status": status,
+            "active_task_id": manager.active_task_id,
         }
         if extra:
             data.update(extra)
@@ -123,6 +124,23 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
             show=show,
         )
 
+    def _set_active(payload: dict[str, Any]) -> ToolResult:
+        task_id = payload.get("task_id")
+        if not task_id:
+            raise ToolInvocationError("Field 'task_id' is required.")
+        show = _bool_flag(payload, "show_todo_list", default=True)
+        expected_rev = payload.get("if_match", manager.revision)
+        try:
+            task = manager.set_active(task_id, expected_revision=expected_rev)
+        except ValueError as exc:
+            todo_render = manager.render()
+            raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
+        return _result(
+            f"Task '{task.id}' is now in progress.",
+            summary=f"Task activated: {task.id}",
+            show=show,
+        )
+
     def _list_tasks(payload: dict[str, Any]) -> ToolResult:
         show = _bool_flag(payload, "show_todo_list", default=False)
         count = len(manager.tasks())
@@ -186,7 +204,11 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
                     "task_id": {"type": "string", "description": "Identifier of the task to update."},
                     "title": {"type": "string", "description": "Replacement title for the task."},
                     "description": {"type": "string", "description": "Replacement description."},
-                    "status": {"type": "string", "enum": ["todo", "done"], "description": "Update the completion status."},
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "done"],
+                        "description": "Update the lifecycle stage (pending, in_progress, done).",
+                    },
                     "show_todo_list": {
                         "type": "boolean",
                         "description": "Set true to request the CLI render the TODO list.",
@@ -221,6 +243,27 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
             },
             output_schema={"type": "object"},
             handler=_complete,
+        ),
+        Tool(
+            name="todo_set_active_task",
+            description="Set a TODO item as the single active (in_progress) entry.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Identifier of the task to activate."},
+                    "show_todo_list": {
+                        "type": "boolean",
+                        "description": "Set true to display the TODO list after activating.",
+                    },
+                    "if_match": {
+                        "type": "integer",
+                        "description": "Expected TODO revision before applying the change.",
+                    },
+                },
+                "required": ["task_id"],
+            },
+            output_schema={"type": "object"},
+            handler=_set_active,
         ),
         Tool(
             name="todo_remove_task",
