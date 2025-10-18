@@ -117,6 +117,41 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
         ctx.render_message("agent", todo_render)
         rendered_roles.add("agent")
 
+    def _complete_todo(step_title: str | None) -> bool:
+        if ctx.todo_manager is None:
+            return False
+        tasks = ctx.todo_manager.tasks()
+        if not tasks:
+            return False
+        normalized_step = step_title.strip().lower() if step_title else None
+        target = None
+        for task in tasks:
+            if task.status == "done":
+                continue
+            if normalized_step and normalized_step in task.title.lower():
+                target = task
+                break
+        if target is None:
+            for task in tasks:
+                if task.status != "done":
+                    target = task
+                    break
+        if target is None:
+            return False
+        try:
+            ctx.todo_manager.mark_complete(target.id, expected_revision=ctx.todo_manager.revision)
+        except ValueError:
+            return False
+        message = f"Marked TODO '{target.title}' complete."
+        display_messages.append(("system", message))
+        ctx.render_message("system", message)
+        rendered_roles.add("system")
+        todo_render = ctx.todo_manager.render()
+        display_messages.append(("agent", todo_render))
+        ctx.render_message("agent", todo_render)
+        rendered_roles.add("agent")
+        return True
+
     def _bootstrap_plan_into_todo(steps: list[str] | None) -> bool:
         if ctx.todo_manager is None:
             return False
@@ -318,7 +353,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                     display_messages.append(("agent", preview))
                     ctx.render_message("agent", preview)
                     rendered_roles.add("agent")
-                    _maybe_render_todo(payload_data)
+                    completed = False
+                    if status == "success":
+                        completed = _complete_todo(step_title)
+                    if not completed:
+                        _maybe_render_todo(payload_data)
 
                     summary_entry: dict[str, Any] = {
                         "type": "tool",
