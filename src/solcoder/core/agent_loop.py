@@ -345,10 +345,13 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         output = str(exc)
                         payload_data = None
 
+                    is_todo_tool = tool_name.startswith("todo_")
+
                     preview = _format_tool_preview(step_title, output)
-                    display_messages.append(("agent", preview))
-                    ctx.render_message("agent", preview)
-                    rendered_roles.add("agent")
+                    if not is_todo_tool:
+                        display_messages.append(("agent", preview))
+                        ctx.render_message("agent", preview)
+                        rendered_roles.add("agent")
                     _maybe_render_todo(payload_data)
 
                     if isinstance(payload_data, dict) and payload_data.get("exit_app"):
