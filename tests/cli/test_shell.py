@@ -587,7 +587,7 @@ def test_todo_command_add_and_complete(
     assert "Write docs" in titles
     done_task = next(task for task in app.todo_manager.tasks() if task.title == "Write docs")
     assert done_task.status == "done"
-    assert any("TODO List" in message for _, message in plan_response.messages)
+    assert any("unfinished items" in message for _, message in plan_response.messages if message)
 
 
 def test_todo_persistence_across_sessions(

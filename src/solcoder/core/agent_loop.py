@@ -201,11 +201,22 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
             rendered_roles.add("system")
             ctx.todo_manager.acknowledge()
         else:
-            summary = (
-                "All TODO items are complete. 🎉\n"
-                f"{ctx.todo_manager.render()}\n"
-                "Tip: Run `/todo clear` to reset the list when you are ready to start fresh."
-            )
+            render_before = ctx.todo_manager.render()
+            summary: str
+            try:
+                ctx.todo_manager.clear(expected_revision=ctx.todo_manager.revision)
+            except ValueError:
+                summary = (
+                    "All TODO items are complete, but the list changed before it could be cleared.\n"
+                    f"{render_before}\n"
+                    "Review the remaining items with `/todo list`."
+                )
+            else:
+                summary = (
+                    "All TODO items are complete. 🎉\n"
+                    f"{render_before}\n"
+                    "TODO list cleared for the next run."
+                )
             display_messages.append(("system", summary))
             ctx.render_message("system", summary)
             rendered_roles.add("system")
