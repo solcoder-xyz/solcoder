@@ -236,6 +236,36 @@ def test_agent_can_reply_without_plan(
     assert response.tool_calls[0]["type"] == "llm"
 
 
+def test_agent_requires_plan_when_todo_exists(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    script = [
+        {"expect": expect_equals("work todo"), "reply": {"type": "reply", "message": "Sure"}},
+        {"expect": expect_contains('"type": "error"'), "reply": {"type": "plan", "message": "Plan todo", "steps": ["Complete tasks"]}},
+        {"expect": expect_equals(AGENT_PLAN_ACK), "reply": {"type": "reply", "message": "Done"}},
+    ]
+    llm = ScriptedLLM(script)
+
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    app.handle_line("/todo add Finish docs")
+    response = app.handle_line("work todo")
+
+    assert llm.script == []
+    assert len(app.todo_manager.tasks()) == 1
+    assert app.todo_manager.tasks()[0].title == "Finish docs"
+    assert any("TODO List" in message for _, message in response.messages)
+
+
 def test_agent_loop_runs_tool(
     console: Console,
     session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],

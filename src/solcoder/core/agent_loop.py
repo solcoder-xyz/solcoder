@@ -249,6 +249,17 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                         pending_prompt = AGENT_PLAN_ACK
                         continue
                     if directive.type == "reply":
+                        has_tasks = bool(ctx.todo_manager and ctx.todo_manager.tasks())
+                        if has_tasks:
+                            pending_prompt = json.dumps(
+                                {
+                                    "type": "error",
+                                    "message": (
+                                        "Active TODO items detected. Provide a plan or use the TODO tools to mark steps complete before replying."
+                                    ),
+                                }
+                            )
+                            continue
                         final_message = directive.message or ""
                         if directive.step_title:
                             final_message = f"{directive.step_title}\n{final_message}"
