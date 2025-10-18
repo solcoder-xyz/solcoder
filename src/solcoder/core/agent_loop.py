@@ -170,18 +170,36 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         rendered_roles.add("agent")
         return True
 
-    def _augment_with_active_task(message: str) -> str:
+    def _append_active_summary() -> None:
         if ctx.todo_manager is None:
-            return message
-        if "[[RENDER_TODO_PANEL]]" in message:
-            return message
+            return
         active = ctx.todo_manager.active_task()
-        if active is None:
-            return message
-        note = f"Active task: {active.id} — {active.title}"
-        if note in message:
-            return message
-        return f"{message}\n\n{note}"
+        tool_summaries[:] = [
+            entry for entry in tool_summaries if entry.get("type") != "todo_active"
+        ]
+        summary_entry: dict[str, Any] = {
+            "type": "todo_active",
+            "status": "in_progress" if active else "idle",
+        }
+        if active is not None:
+            summary_entry["summary"] = f"{active.id}: {active.title}"
+            summary_entry["active_task"] = {
+                "id": active.id,
+                "title": active.title,
+                "status": active.status,
+            }
+        else:
+            summary_entry["summary"] = "No active task"
+        tool_summaries.append(summary_entry)
+
+    def _show_current_todo_panel() -> None:
+        if ctx.todo_manager is None:
+            return
+        payload = {
+            "show_todo_list": True,
+            "todo_render": ctx.todo_manager.render(),
+        }
+        _maybe_render_todo(payload)
 
     def _enforce_task_sequence() -> str | None:
         if ctx.todo_manager is None:
@@ -296,10 +314,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             plan_text = _format_plan_message(
                                 directive.steps or [], directive.message
                             )
-                            plan_text = _augment_with_active_task(plan_text)
                             display_messages.append(("agent", plan_text))
                             ctx.render_message("agent", plan_text)
                             rendered_roles.add("agent")
+                        _append_active_summary()
                         if directive.steps:
                             status_message = Text(
                                 directive.steps[0], style="solcoder.status.text"
@@ -309,6 +327,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
                     sequence_warning = _enforce_task_sequence()
                     if sequence_warning is not None:
+                        _show_current_todo_panel()
                         pending_prompt = json.dumps(
                             {
                                 "type": "error",
@@ -365,10 +384,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         plan_text = _format_plan_message(
                             directive.steps or [], directive.message
                         )
-                        plan_text = _augment_with_active_task(plan_text)
                         display_messages.append(("agent", plan_text))
                         ctx.render_message("agent", plan_text)
                         rendered_roles.add("agent")
+                    _append_active_summary()
                     if directive.steps:
                         status_message = Text(
                             directive.steps[0], style="solcoder.status.text"
@@ -378,6 +397,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
                 sequence_warning = _enforce_task_sequence()
                 if sequence_warning is not None:
+                    _show_current_todo_panel()
                     pending_prompt = json.dumps(
                         {"type": "error", "message": sequence_warning}
                     )
@@ -403,11 +423,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
                     preview = _format_tool_preview(step_title, output)
                     if not is_todo_tool:
-                        preview = _augment_with_active_task(preview)
                         display_messages.append(("agent", preview))
                         ctx.render_message("agent", preview)
                         rendered_roles.add("agent")
                     _maybe_render_todo(payload_data)
+                    _append_active_summary()
 
                     if isinstance(payload_data, dict) and payload_data.get("exit_app"):
                         should_exit = True
@@ -456,10 +476,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     final_message = directive.message or ""
                     if directive.step_title:
                         final_message = f"{directive.step_title}\n{final_message}"
-                    final_message = _augment_with_active_task(final_message)
                     display_messages.append(("agent", final_message))
                     ctx.render_message("agent", final_message)
                     rendered_roles.add("agent")
+                    _append_active_summary()
                     status_message = Text("Thinking…", style="solcoder.status.text")
                     _handle_completion_todo()
                     break
