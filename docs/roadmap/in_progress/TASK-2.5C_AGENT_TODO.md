@@ -1,7 +1,7 @@
 # Task 2.5c — Agent TODO Memory
 
 - Milestone: [MILESTONE-2_CONVERSATIONAL_CORE](../milestones/MILESTONE-2_CONVERSATIONAL_CORE.md)
-- Status: Proposed (follow-up to 2.5b)
+- Status: In progress (follow-up to 2.5b)
 
 ## Objective
 Augment the agentic loop with an in-memory TODO list so the LLM can persist its plan, mark steps complete, recall outstanding work, and clear the list when done. The agent should:
