@@ -202,7 +202,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
             summary_entry["summary"] = "No active task"
         tool_summaries.append(summary_entry)
 
-    def _show_current_todo_panel(*, force: bool = False) -> None:
+    def _show_current_todo_panel() -> None:
         if ctx.todo_manager is None:
             return
         payload = {
@@ -210,9 +210,6 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
             "todo_render": ctx.todo_manager.render(),
             "revision": ctx.todo_manager.revision,
         }
-        nonlocal todo_render_revision
-        if force:
-            todo_render_revision = -1
         _maybe_render_todo(payload)
 
     def _enforce_task_sequence() -> str | None:
@@ -332,7 +329,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             ctx.render_message("agent", plan_text)
                             rendered_roles.add("agent")
                         _append_active_summary()
-                        _show_current_todo_panel(force=auto_rendered)
+                        if auto_rendered:
+                            _show_current_todo_panel()
                         if directive.steps:
                             status_message = Text(
                                 directive.steps[0], style="solcoder.status.text"
@@ -403,7 +401,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         ctx.render_message("agent", plan_text)
                         rendered_roles.add("agent")
                     _append_active_summary()
-                    _show_current_todo_panel(force=True)
+                    _show_current_todo_panel()
                     if directive.steps:
                         status_message = Text(
                             directive.steps[0], style="solcoder.status.text"
@@ -444,7 +442,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         rendered_roles.add("agent")
                     _maybe_render_todo(payload_data)
                     _append_active_summary()
-                    _show_current_todo_panel(force=is_todo_tool)
+                    if is_todo_tool:
+                        _show_current_todo_panel()
 
                     if isinstance(payload_data, dict) and payload_data.get("exit_app"):
                         should_exit = True
@@ -497,7 +496,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     ctx.render_message("agent", final_message)
                     rendered_roles.add("agent")
                     _append_active_summary()
-                    _show_current_todo_panel(force=True)
+                    _show_current_todo_panel()
                     status_message = Text("Thinking…", style="solcoder.status.text")
                     _handle_completion_todo()
                     break
