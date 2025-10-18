@@ -11,6 +11,21 @@ def _normalize_title(title: str) -> str:
     return " ".join(title.strip().split()).lower()
 
 
+def _is_management_task(normalized_title: str) -> bool:
+    if "todo" not in normalized_title:
+        return False
+    phrases = [
+        "todo list",
+        "review the todo",
+        "review current todo",
+        "mark the todo",
+        "manage the todo",
+        "acknowledge remaining todo",
+        "acknowledge the todo",
+    ]
+    return any(phrase in normalized_title for phrase in phrases)
+
+
 TaskStatus = Literal["todo", "done"]
 
 
@@ -56,6 +71,8 @@ class TodoManager:
         if not title or not title.strip():
             raise ValueError("Task title is required.")
         normalized = _normalize_title(title)
+        if _is_management_task(normalized):
+            raise ValueError("Task describes TODO management and was skipped.")
         self._check_revision(expected_revision)
         duplicate = self._find_duplicate(normalized)
         if duplicate and duplicate.status != "done":
@@ -85,6 +102,8 @@ class TodoManager:
             if not title.strip():
                 raise ValueError("Task title cannot be empty.")
             normalized = _normalize_title(title)
+            if _is_management_task(normalized):
+                raise ValueError("Task describes TODO management and was skipped.")
             duplicate = self._find_duplicate(normalized)
             if duplicate and duplicate.id != task.id and duplicate.status != "done":
                 raise ValueError(f"Task already exists: {duplicate.id}")
@@ -189,6 +208,58 @@ class TodoManager:
     def acknowledge_if_empty(self) -> None:
         if not self._tasks:
             self._acknowledged = True
+
+    def dump_state(self) -> dict[str, Any]:
+        return {
+            "tasks": [task.to_dict() for task in self._tasks],
+            "revision": self.revision,
+            "acknowledged": self._acknowledged,
+        }
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        tasks_raw = state.get("tasks") or []
+        if not isinstance(tasks_raw, list):
+            tasks_raw = []
+        tasks: list[TodoItem] = []
+        max_index = 0
+        for entry in tasks_raw:
+            if not isinstance(entry, dict):
+                continue
+            title = str(entry.get("title") or "").strip()
+            if not title:
+                continue
+            normalized = _normalize_title(title)
+            if _is_management_task(normalized):
+                continue
+            task_id = str(entry.get("id") or "")
+            if not task_id:
+                task_id = f"T{len(tasks) + 1}"
+            description = entry.get("description")
+            if description is not None:
+                description = str(description)
+            status = entry.get("status", "todo")
+            if status not in ("todo", "done"):
+                status = "todo"
+            todo_item = TodoItem(
+                id=task_id,
+                title=title,
+                description=description,
+                status=status,  # type: ignore[arg-type]
+                normalized_title=normalized,
+            )
+            tasks.append(todo_item)
+            if task_id.startswith("T"):
+                try:
+                    max_index = max(max_index, int(task_id[1:]))
+                except ValueError:
+                    continue
+
+        next_index = max(max_index + 1, len(tasks) + 1)
+        self._tasks = tasks
+        self._counter = itertools.count(next_index)
+        self.revision = int(state.get("revision", len(tasks)))
+        self._acknowledged = bool(state.get("acknowledged", False))
+        self._last_revision_mismatch = False
 
 
 def serialize_tasks(tasks: Iterable[TodoItem]) -> list[dict[str, Any]]:

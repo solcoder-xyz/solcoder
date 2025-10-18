@@ -85,6 +85,7 @@ class CLIApp:
             llm=self._llm,
             config_context=self.config_context,
         )
+        self._load_todo_state()
         self.tool_registry = tool_registry or build_default_registry()
         try:
             self.tool_registry.add_toolkit(todo_toolkit(self.todo_manager))
@@ -296,6 +297,39 @@ class CLIApp:
         )
         return f"{todo_render}\n{guidance}"
 
+    def _load_todo_state(self) -> None:
+        if self.session_manager is None:
+            return
+        state = self.session_manager.load_todo(self.session_context.metadata.session_id)
+        if not state:
+            return
+        tasks = state.get("tasks") or []
+        unfinished = [task for task in tasks if isinstance(task, dict) and task.get("status") != "done"]
+        if unfinished and not self._should_import_todo(len(unfinished)):
+            logger.debug("Skipping import of %s unfinished TODO items", len(unfinished))
+            return
+        try:
+            self.todo_manager.load_state(state)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to load TODO state: %s", exc)
+
+    def _should_import_todo(self, count: int) -> bool:
+        if count <= 0:
+            return True
+        try:
+            is_tty = sys.stdin.isatty()
+        except Exception:  # noqa: BLE001
+            is_tty = False
+        if not is_tty:
+            return True
+        try:
+            response = self.console.input(
+                f"Import {count} open task{'s' if count != 1 else ''}? (y/N) "
+            )
+        except (EOFError, KeyboardInterrupt):
+            return False
+        return response.strip().lower() in {"y", "yes"}
+
     def _write_secret_file(self, target: Path, secret: str) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(secret)
@@ -307,6 +341,11 @@ class CLIApp:
     def _persist(self) -> None:
         if self.session_manager is not None:
             self.session_manager.save(self.session_context)
+            try:
+                state = self.todo_manager.dump_state()
+            except Exception:  # noqa: BLE001
+                state = {"tasks": [], "revision": 0, "acknowledged": True}
+            self.session_manager.save_todo(self.session_context.metadata.session_id, state)
 
     @staticmethod
     def _default_console() -> Console:

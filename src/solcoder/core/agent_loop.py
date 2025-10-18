@@ -129,7 +129,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
             normalized = step.strip()
             if normalized.lower() in existing_titles:
                 continue
-            ctx.todo_manager.create_task(normalized)
+            try:
+                ctx.todo_manager.create_task(normalized)
+            except ValueError:
+                continue
             existing_titles.add(normalized.lower())
             added = True
         if not existing_tasks and not added:

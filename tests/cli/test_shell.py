@@ -529,6 +529,34 @@ def test_todo_command_add_and_complete(
     assert any("TODO List" in message for _, message in plan_response.messages)
 
 
+def test_todo_persistence_across_sessions(
+    console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    app.handle_line("/todo add Persist me")
+    session_id = context.metadata.session_id
+
+    new_context = manager.start(session_id=session_id)
+    new_app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=new_context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    titles = [task.title for task in new_app.todo_manager.tasks()]
+    assert "Persist me" in titles
+
+
 def test_settings_summary(
     console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
 ) -> None:

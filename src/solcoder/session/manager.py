@@ -81,6 +81,30 @@ class SessionManager:
         self._enforce_rotation()
 
     # ------------------------------------------------------------------
+    def save_todo(self, session_id: str, payload: dict[str, Any]) -> None:
+        session_dir = self.root / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        todo_path = self._todo_path(session_id)
+        tmp_path = todo_path.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(payload, indent=2))
+        tmp_path.replace(todo_path)
+
+    def load_todo(self, session_id: str) -> dict[str, Any] | None:
+        todo_path = self._todo_path(session_id)
+        if not todo_path.exists():
+            return None
+        try:
+            return json.loads(todo_path.read_text())
+        except json.JSONDecodeError:
+            return None
+
+    def todo_exists(self, session_id: str) -> bool:
+        return self._todo_path(session_id).exists()
+
+    def _todo_path(self, session_id: str) -> Path:
+        return self.root / session_id / "todo.json"
+
+    # ------------------------------------------------------------------
     def _create_new(self, *, active_project: str | None) -> SessionContext:
         session_id = uuid.uuid4().hex[:12]
         metadata = SessionMetadata(
