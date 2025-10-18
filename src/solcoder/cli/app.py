@@ -243,7 +243,6 @@ class CLIApp:
 
         self.context_manager.record("user", raw_line)
         self._render_message("user", raw_line)
-        self.console.print()
 
         if raw_line.startswith("/"):
             logger.debug("Processing slash command: %s", raw_line)
@@ -322,27 +321,26 @@ class CLIApp:
     # ------------------------------------------------------------------
     def _render_message(self, role: str, message: str) -> None:
         if role == "user":
-            panel_title = "[#A855F7]You[/]"
-            border_style = "solcoder.user.border"
-            text_style = "solcoder.user.text"
+            header = Text.from_markup("[#A855F7]🟣 You[/]")
+            body_style = "solcoder.user.text"
         elif role == "agent":
-            panel_title = "[#14F195]SolCoder[/]"
-            border_style = "solcoder.agent.border"
-            text_style = "solcoder.agent.text"
+            header = Text.from_markup("[#14F195]🟢 SolCoder[/]")
+            body_style = "solcoder.agent.text"
         else:
-            panel_title = f"[#F472B6]{role.title()}[/]"
-            border_style = "solcoder.system.border"
-            text_style = "solcoder.system.text"
-        text = Text(message, style=text_style)
-        panel = Panel(
-            text,
-            title=panel_title,
-            border_style=border_style,
-            expand=False,
-            padding=(1, 2),
-            style="on #0E0E0E",
-        )
-        self.console.print(panel)
+            header = Text.from_markup(f"[#F472B6]🔔 {role.title()}[/]")
+            body_style = "solcoder.system.text"
+
+        self.console.print(header)
+
+        body = Text()
+        lines = message.splitlines() or [""]
+        for idx, line in enumerate(lines):
+            body.append("  ", style="dim")
+            body.append(line, style=body_style)
+            if idx != len(lines) - 1:
+                body.append("\n")
+        self.console.print(body)
+        self.console.print()
 
     def _render_status(self) -> None:
         if self.status_bar.supports_toolbar:
@@ -444,7 +442,7 @@ class CLIApp:
                 self._pt_console.print(*objects, **kwargs)
             rendered = capture.get()
             if rendered:
-                app.print_text(ANSI(rendered), refresh=True)
+                app.print_text(ANSI(rendered))
         else:
             self._console.print(*objects, **kwargs)
 
