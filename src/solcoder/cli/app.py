@@ -444,7 +444,7 @@ class CLIApp:
                 self._pt_console.print(*objects, **kwargs)
             rendered = capture.get()
             if rendered:
-                app.print_text(ANSI(rendered))
+                app.print_text(ANSI(rendered), refresh=True)
         else:
             self._console.print(*objects, **kwargs)
 
