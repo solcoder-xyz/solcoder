@@ -171,6 +171,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                 continue
             existing_titles.add(normalized_title)
             added = True
+            todo_render_revision = -1
         if not existing_tasks and not added:
             return False
         todo_render = ctx.todo_manager.render()
@@ -209,6 +210,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
             "todo_render": ctx.todo_manager.render(),
             "revision": ctx.todo_manager.revision,
         }
+        nonlocal todo_render_revision
+        todo_render_revision = -1
         _maybe_render_todo(payload)
 
     def _enforce_task_sequence() -> str | None:
