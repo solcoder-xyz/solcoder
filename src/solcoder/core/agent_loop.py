@@ -75,6 +75,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     retry_payload: str | None = None
     todo_render_revision = -1
     should_exit = False
+    preexisting_unfinished = bool(
+        ctx.todo_manager and ctx.todo_manager.has_unfinished_tasks()
+    )
+    plan_added_tasks = False
     llm_log_dir = Path(".solcoder/logs/llm")
 
     provider_name, model_name, reasoning_effort = _active_model_details(
@@ -242,6 +246,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     def _show_current_todo_panel() -> None:
         if ctx.todo_manager is None:
             return
+        if not ctx.todo_manager.tasks():
+            return
         payload = {
             "show_todo_list": True,
             "todo_render": ctx.todo_manager.render(),
@@ -344,6 +350,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         ctx.render_message("system", error_message)
                         rendered_roles.add("system")
                         break
+                    error_message = f"Invalid agent directive: {exc}"
+                    display_messages.append(("system", error_message))
+                    ctx.render_message("system", error_message)
+                    rendered_roles.add("system")
                     retry_payload = json.dumps(
                         {
                             "type": "error",
@@ -362,8 +372,20 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
                 if not plan_received:
                     if directive.type == "plan":
+                        prev_revision = (
+                            ctx.todo_manager.revision
+                            if ctx.todo_manager is not None
+                            else None
+                        )
                         plan_received = True
                         auto_rendered = _bootstrap_plan_into_todo(directive.steps)
+                        if (
+                            not preexisting_unfinished
+                            and ctx.todo_manager is not None
+                            and prev_revision is not None
+                            and ctx.todo_manager.revision != prev_revision
+                        ):
+                            plan_added_tasks = True
                         if not auto_rendered:
                             plan_text = _format_plan_message(
                                 directive.steps or [], directive.message
@@ -393,10 +415,12 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         continue
 
                     if directive.type == "reply":
-                        has_unfinished = bool(
-                            ctx.todo_manager and ctx.todo_manager.has_unfinished_tasks()
-                        )
-                        if has_unfinished:
+                        if (
+                            preexisting_unfinished
+                            and not plan_added_tasks
+                            and ctx.todo_manager is not None
+                            and ctx.todo_manager.has_unfinished_tasks()
+                        ):
                             pending_prompt = json.dumps(
                                 {
                                     "type": "error",
@@ -436,6 +460,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     continue
 
                 if directive.type == "plan":
+                    prev_revision = (
+                        ctx.todo_manager.revision
+                        if ctx.todo_manager is not None
+                        else None
+                    )
                     if not _bootstrap_plan_into_todo(directive.steps):
                         plan_text = _format_plan_message(
                             directive.steps or [], directive.message
@@ -443,6 +472,13 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         display_messages.append(("agent", plan_text))
                         ctx.render_message("agent", plan_text)
                         rendered_roles.add("agent")
+                    if (
+                        not preexisting_unfinished
+                        and ctx.todo_manager is not None
+                        and prev_revision is not None
+                        and ctx.todo_manager.revision != prev_revision
+                    ):
+                        plan_added_tasks = True
                     _append_active_summary()
                     _show_current_todo_panel()
                     if directive.steps:
@@ -519,19 +555,6 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     continue
 
                 if directive.type == "reply":
-                    has_unfinished = bool(
-                        ctx.todo_manager and ctx.todo_manager.has_unfinished_tasks()
-                    )
-                    if has_unfinished:
-                        pending_prompt = json.dumps(
-                            {
-                                "type": "error",
-                                "message": (
-                                    "Active TODO items detected. Provide a plan or update the TODO list before finishing."
-                                ),
-                            }
-                        )
-                        continue
                     final_message = directive.message or ""
                     if directive.step_title:
                         final_message = f"{directive.step_title}\n{final_message}"
