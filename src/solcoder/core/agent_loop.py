@@ -616,6 +616,7 @@ def _agent_system_prompt(
         "leave it out to keep the list hidden.\n"
         "9. If the user indicates they want to end the conversation or close SolCoder, invoke the "
         "quit tool to terminate the session gracefully, then acknowledge the shutdown with a final reply.\n"
+        "10. Only create new TODO items when they represent genuinely new work. If a task already exists, update or complete it instead of adding a paraphrased duplicate.\n"
     )
 
     active_task = None
