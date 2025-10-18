@@ -170,6 +170,19 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         rendered_roles.add("agent")
         return True
 
+    def _augment_with_active_task(message: str) -> str:
+        if ctx.todo_manager is None:
+            return message
+        if "[[RENDER_TODO_PANEL]]" in message:
+            return message
+        active = ctx.todo_manager.active_task()
+        if active is None:
+            return message
+        note = f"Active task: {active.id} — {active.title}"
+        if note in message:
+            return message
+        return f"{message}\n\n{note}"
+
     def _handle_completion_todo() -> None:
         if ctx.todo_manager is None:
             return
@@ -319,6 +332,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         plan_text = _format_plan_message(
                             directive.steps or [], directive.message
                         )
+                        plan_text = _augment_with_active_task(plan_text)
                         display_messages.append(("agent", plan_text))
                         ctx.render_message("agent", plan_text)
                         rendered_roles.add("agent")
@@ -349,6 +363,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
                     preview = _format_tool_preview(step_title, output)
                     if not is_todo_tool:
+                        preview = _augment_with_active_task(preview)
                         display_messages.append(("agent", preview))
                         ctx.render_message("agent", preview)
                         rendered_roles.add("agent")
@@ -401,6 +416,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     final_message = directive.message or ""
                     if directive.step_title:
                         final_message = f"{directive.step_title}\n{final_message}"
+                    final_message = _augment_with_active_task(final_message)
                     display_messages.append(("agent", final_message))
                     ctx.render_message("agent", final_message)
                     rendered_roles.add("agent")
