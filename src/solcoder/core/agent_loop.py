@@ -18,7 +18,7 @@ from solcoder.core import (
     manifest_to_prompt_section,
     parse_agent_directive,
 )
-from solcoder.core.todo import TodoManager
+from solcoder.core.todo import TodoItem, TodoManager
 from solcoder.core.todo import _normalize_title as _todo_normalize_title
 from solcoder.core.tool_registry import ToolRegistry, ToolRegistryError
 from solcoder.session import SessionMetadata
@@ -183,6 +183,27 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
             return message
         return f"{message}\n\n{note}"
 
+    def _enforce_task_sequence() -> str | None:
+        if ctx.todo_manager is None:
+            return None
+        active = ctx.todo_manager.active_task()
+        if active is None:
+            return None
+        first_open: TodoItem | None = None
+        for task in ctx.todo_manager.tasks():
+            if task.status != "done":
+                first_open = task
+                break
+        if first_open is None:
+            return None
+        if first_open.id == active.id:
+            return None
+        return (
+            "Task ordering mismatch detected. "
+            f"{first_open.id} — {first_open.title} is still open but {active.id} is in progress. "
+            "Confirm earlier steps are complete or update the TODO list before continuing."
+        )
+
     def _handle_completion_todo() -> None:
         if ctx.todo_manager is None:
             return
@@ -275,6 +296,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             plan_text = _format_plan_message(
                                 directive.steps or [], directive.message
                             )
+                            plan_text = _augment_with_active_task(plan_text)
                             display_messages.append(("agent", plan_text))
                             ctx.render_message("agent", plan_text)
                             rendered_roles.add("agent")
@@ -284,6 +306,17 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             )
                         pending_prompt = AGENT_PLAN_ACK
                         continue
+
+                    sequence_warning = _enforce_task_sequence()
+                    if sequence_warning is not None:
+                        pending_prompt = json.dumps(
+                            {
+                                "type": "error",
+                                "message": sequence_warning,
+                            }
+                        )
+                        continue
+
                     if directive.type == "reply":
                         has_unfinished = bool(
                             ctx.todo_manager and ctx.todo_manager.has_unfinished_tasks()
@@ -341,6 +374,13 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             directive.steps[0], style="solcoder.status.text"
                         )
                     pending_prompt = AGENT_PLAN_ACK
+                    continue
+
+                sequence_warning = _enforce_task_sequence()
+                if sequence_warning is not None:
+                    pending_prompt = json.dumps(
+                        {"type": "error", "message": sequence_warning}
+                    )
                     continue
 
                 if directive.type == "tool_request":
