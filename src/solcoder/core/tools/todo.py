@@ -29,22 +29,34 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         *,
         summary: str,
         show: bool,
+        status: str = "success",
+        extra: dict[str, Any] | None = None,
     ) -> ToolResult:
         data = {
             "tasks": serialize_tasks(manager.tasks()),
             "show_todo_list": show,
             "todo_render": manager.render(),
+            "revision": manager.revision,
+            "revision_mismatch": manager.pop_revision_mismatch(),
+            "acknowledged": manager.acknowledged,
+            "status": status,
         }
+        if extra:
+            data.update(extra)
+        if data["revision_mismatch"]:
+            data["show_todo_list"] = True
         return ToolResult(content=content, summary=summary, data=data)
 
     def _create(payload: dict[str, Any]) -> ToolResult:
         title = payload.get("title")
         description = payload.get("description")
         show = _bool_flag(payload, "show_todo_list", default=False)
+        expected_rev = payload.get("if_match", manager.revision)
         try:
-            task = manager.create_task(title or "", description=description)
+            task = manager.create_task(title or "", description=description, expected_revision=expected_rev)
         except ValueError as exc:
-            raise ToolInvocationError(str(exc)) from exc
+            todo_render = manager.render()
+            raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
         return _result(
             f"Task '{task.title}' added (id: {task.id}).",
             summary=f"Task added: {task.id}",
@@ -59,15 +71,18 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         show = _bool_flag(payload, "show_todo_list", default=False)
         if all(value is None for value in fields.values()):
             raise ToolInvocationError("Provide at least one field to update.")
+        expected_rev = payload.get("if_match", manager.revision)
         try:
             task = manager.update_task(
                 task_id,
                 title=fields["title"],
                 description=fields["description"],
                 status=fields["status"],
+                expected_revision=expected_rev,
             )
         except ValueError as exc:
-            raise ToolInvocationError(str(exc)) from exc
+            todo_render = manager.render()
+            raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
         return _result(
             f"Task '{task.id}' updated.",
             summary=f"Task updated: {task.id}",
@@ -79,10 +94,12 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         if not task_id:
             raise ToolInvocationError("Field 'task_id' is required.")
         show = _bool_flag(payload, "show_todo_list", default=False)
+        expected_rev = payload.get("if_match", manager.revision)
         try:
-            task = manager.mark_complete(task_id)
+            task = manager.mark_complete(task_id, expected_revision=expected_rev)
         except ValueError as exc:
-            raise ToolInvocationError(str(exc)) from exc
+            todo_render = manager.render()
+            raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
         return _result(
             f"Task '{task.id}' marked complete.",
             summary=f"Task completed: {task.id}",
@@ -94,10 +111,12 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         if not task_id:
             raise ToolInvocationError("Field 'task_id' is required.")
         show = _bool_flag(payload, "show_todo_list", default=False)
+        expected_rev = payload.get("if_match", manager.revision)
         try:
-            manager.remove_task(task_id)
+            manager.remove_task(task_id, expected_revision=expected_rev)
         except ValueError as exc:
-            raise ToolInvocationError(str(exc)) from exc
+            todo_render = manager.render()
+            raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
         return _result(
             f"Task '{task_id}' removed.",
             summary=f"Task removed: {task_id}",
@@ -108,18 +127,30 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         show = _bool_flag(payload, "show_todo_list", default=False)
         count = len(manager.tasks())
         plural = "task" if count == 1 else "tasks"
+        extra = {"revision": manager.revision}
         return _result(
             f"{count} {plural} tracked.",
             summary=f"{count} {plural}",
             show=show,
+            extra=extra,
         )
 
     def _clear(payload: dict[str, Any]) -> ToolResult:
         show = _bool_flag(payload, "show_todo_list", default=False)
-        manager.clear()
+        expected_rev = payload.get("if_match", manager.revision)
+        manager.clear(expected_revision=expected_rev)
         return _result(
             "All tasks cleared.",
             summary="TODO list cleared",
+            show=show,
+        )
+
+    def _acknowledge(payload: dict[str, Any]) -> ToolResult:
+        show = _bool_flag(payload, "show_todo_list", default=True)
+        manager.acknowledge()
+        return _result(
+            "Remaining tasks acknowledged.",
+            summary="TODO list acknowledged",
             show=show,
         )
 
@@ -135,6 +166,10 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
                     "show_todo_list": {
                         "type": "boolean",
                         "description": "Set true to request the CLI render the TODO list.",
+                    },
+                    "if_match": {
+                        "type": "integer",
+                        "description": "Expected TODO revision before applying the change.",
                     },
                 },
                 "required": ["title"],
@@ -156,6 +191,10 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
                         "type": "boolean",
                         "description": "Set true to request the CLI render the TODO list.",
                     },
+                    "if_match": {
+                        "type": "integer",
+                        "description": "Expected TODO revision before applying the change.",
+                    },
                 },
                 "required": ["task_id"],
             },
@@ -173,6 +212,10 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
                         "type": "boolean",
                         "description": "Set true to request the CLI render the TODO list.",
                     },
+                    "if_match": {
+                        "type": "integer",
+                        "description": "Expected TODO revision before applying the change.",
+                    },
                 },
                 "required": ["task_id"],
             },
@@ -189,6 +232,10 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
                     "show_todo_list": {
                         "type": "boolean",
                         "description": "Set true to request the CLI render the TODO list.",
+                    },
+                    "if_match": {
+                        "type": "integer",
+                        "description": "Expected TODO revision before applying the change.",
                     },
                 },
                 "required": ["task_id"],
@@ -222,11 +269,31 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
                         "type": "boolean",
                         "description": "Set true to request the CLI render the TODO list (will be empty after clearing).",
                     },
+                    "if_match": {
+                        "type": "integer",
+                        "description": "Expected TODO revision before clearing the list.",
+                    },
                 },
                 "required": [],
             },
             output_schema={"type": "object"},
             handler=_clear,
+        ),
+        Tool(
+            name="todo_acknowledge_remaining",
+            description="Mark outstanding TODO items as acknowledged to suppress reminders.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "show_todo_list": {
+                        "type": "boolean",
+                        "description": "Set true to display the current TODO list after acknowledging.",
+                    },
+                },
+                "required": [],
+            },
+            output_schema={"type": "object"},
+            handler=_acknowledge,
         ),
     ]
 

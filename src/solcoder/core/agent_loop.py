@@ -145,9 +145,12 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
             return
         tasks = ctx.todo_manager.tasks()
         if not tasks:
+            ctx.todo_manager.acknowledge()
             return
         remaining = [task for task in tasks if task.status != "done"]
         if remaining:
+            if ctx.todo_manager.acknowledged:
+                return
             reminder = (
                 "TODO list still has unfinished items.\n"
                 f"{ctx.todo_manager.render()}\n"
@@ -156,6 +159,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
             display_messages.append(("system", reminder))
             ctx.render_message("system", reminder)
             rendered_roles.add("system")
+            ctx.todo_manager.acknowledge()
         else:
             ctx.todo_manager.clear()
 

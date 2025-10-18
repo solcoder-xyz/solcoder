@@ -34,8 +34,10 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         if action == "list":
             return CommandResponse(messages=[("system", app.todo_manager.render())])
         if action == "clear":
-            app.todo_manager.clear()
+            app.todo_manager.clear(expected_revision=app.todo_manager.revision)
             return CommandResponse(messages=[("system", "TODO list cleared.\n" + app.todo_manager.render())])
+        if action in {"confirm", "confirm-remaining"}:
+            return _handle_confirm(app)
 
         return CommandResponse(messages=[("system", USAGE)])
 
@@ -46,7 +48,14 @@ def _handle_add(app: "CLIApp", args: list[str]) -> CommandResponse:
     title, description = _parse_title_and_description(args)
     if not title:
         return CommandResponse(messages=[("system", "TODO add requires a title. Try `/todo add Fix bug --desc='details'`.")])
-    task = app.todo_manager.create_task(title, description=description)
+    try:
+        task = app.todo_manager.create_task(
+            title,
+            description=description,
+            expected_revision=app.todo_manager.revision,
+        )
+    except ValueError as exc:
+        return CommandResponse(messages=[("system", str(exc))])
     message = [f"Task {task.id} added.", "", app.todo_manager.render()]
     return CommandResponse(messages=[("system", "\n".join(message))])
 
@@ -64,6 +73,7 @@ def _handle_update(app: "CLIApp", args: list[str]) -> CommandResponse:
             title=updates.get("title"),
             description=updates.get("description"),
             status=updates.get("status"),
+            expected_revision=app.todo_manager.revision,
         )
     except ValueError as exc:
         return CommandResponse(messages=[("system", str(exc))])
@@ -76,7 +86,7 @@ def _handle_done(app: "CLIApp", args: list[str]) -> CommandResponse:
         return CommandResponse(messages=[("system", "TODO done requires a task id.")])
     task_id = args[0]
     try:
-        app.todo_manager.mark_complete(task_id)
+        app.todo_manager.mark_complete(task_id, expected_revision=app.todo_manager.revision)
     except ValueError as exc:
         return CommandResponse(messages=[("system", str(exc))])
     message = [f"Task {task_id} marked complete.", "", app.todo_manager.render()]
@@ -88,7 +98,7 @@ def _handle_remove(app: "CLIApp", args: list[str]) -> CommandResponse:
         return CommandResponse(messages=[("system", "TODO remove requires a task id.")])
     task_id = args[0]
     try:
-        app.todo_manager.remove_task(task_id)
+        app.todo_manager.remove_task(task_id, expected_revision=app.todo_manager.revision)
     except ValueError as exc:
         return CommandResponse(messages=[("system", str(exc))])
     message = [f"Task {task_id} removed.", "", app.todo_manager.render()]
@@ -132,3 +142,9 @@ def _extract_updates(args: list[str]) -> dict[str, str | None]:
 
 
 __all__ = ["register"]
+def _handle_confirm(app: "CLIApp") -> CommandResponse:
+    if not app.todo_manager.tasks():
+        return CommandResponse(messages=[("system", "TODO list already empty.")])
+    app.todo_manager.acknowledge()
+    message = ["Unfinished tasks acknowledged.", "", app.todo_manager.render()]
+    return CommandResponse(messages=[("system", "\n".join(message))])
