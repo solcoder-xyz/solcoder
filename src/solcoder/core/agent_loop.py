@@ -136,14 +136,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
         elif len(contains) == 1:
             target = contains[0]
         else:
-            hint = (
-                "Multiple TODO items match this step; please update the specific task manually.\n"
-                f"{ctx.todo_manager.render()}"
-            )
-            display_messages.append(("system", hint))
-            ctx.render_message("system", hint)
-            rendered_roles.add("system")
-            return False
+            target = open_tasks[0]
         try:
             ctx.todo_manager.mark_complete(target.id, expected_revision=ctx.todo_manager.revision)
         except ValueError:
