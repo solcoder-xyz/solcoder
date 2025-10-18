@@ -1,7 +1,7 @@
 # Task 2.5d — TODO / Plan Workflow Parity
 
 - Milestone: [MILESTONE-2_CONVERSATIONAL_CORE](../milestones/MILESTONE-2_CONVERSATIONAL_CORE.md)
-- Status: In progress — scoped after Task 2.5c validation
+- Status: In progress — active development underway
 
 ## Objective
 Bring the shared TODO manager in line with the agent plan tooling so both surfaces enforce a consistent execution workflow (multi-step minimum, single active step, automatic wrap-up) while retaining the CLI’s collaborative checklist experience.
@@ -17,6 +17,9 @@ Bring the shared TODO manager in line with the agent plan tooling so both surfac
 2. Adjust agent loop bootstrap/acknowledgement flow to enforce the ≥2-step rule and to auto-clear finished lists.
 3. Refresh CLI command handling, renderers, and state persistence to respect the new status enum and single-active guard.
 4. Expand test coverage (core + CLI) to assert state transitions, revision handling, and aggregate parity with plan usage.
+
+## Current Focus
+- Implementing new `TodoManager` status lifecycle and single-active guard logic.
 
 ## Dependencies
 - Task 2.5c (baseline TODO tooling) must remain stable.
