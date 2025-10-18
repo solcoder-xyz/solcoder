@@ -193,9 +193,9 @@ def test_chat_message_invokes_llm(
     assert response.messages[-2][0] == "agent"
     assert "[stub] Completed request" in response.messages[-2][1]
     assert response.messages[-1][0] == "system"
-    assert "TODO list cleared" in response.messages[-1][1]
+    assert "unfinished items" in response.messages[-1][1]
     assert response.rendered_roles == {"agent", "system"}
-    assert not app.todo_manager.tasks()
+    assert any(task.status == "todo" for task in app.todo_manager.tasks())
     assert response.tool_calls and response.tool_calls[0]["type"] == "llm"
     assert response.tool_calls[0]["status"] == "cached"
     assert response.tool_calls[0]["reasoning_effort"] == config_context.config.llm_reasoning_effort
@@ -261,8 +261,8 @@ def test_agent_requires_plan_when_todo_exists(
     response = app.handle_line("work todo")
 
     assert llm.script == []
-    assert not app.todo_manager.tasks()
-    assert any("TODO list cleared" in message for _, message in response.messages if message)
+    assert app.todo_manager.tasks()
+    assert any("TODO List" in message for _, message in response.messages)
 
 
 def test_agent_loop_runs_tool(
@@ -354,8 +354,8 @@ def test_agent_loop_recovers_from_invalid_json(
     assert "Retry step" in response.messages[0][1]
     assert response.messages[-2][1].startswith("Recovered")
     assert response.messages[-1][0] == "system"
-    assert "TODO list cleared" in response.messages[-1][1]
-    assert not app.todo_manager.tasks()
+    assert "unfinished items" in response.messages[-1][1]
+    assert any(task.status == "todo" for task in app.todo_manager.tasks())
 
 
 def test_agent_loop_reports_invalid_json_twice(
@@ -582,8 +582,8 @@ def test_todo_command_add_and_complete(
     assert "[x]" in complete_response.messages[0][1]
 
     plan_response = app.handle_line("hello solcoder")
-    assert not app.todo_manager.tasks()
-    assert any("TODO list cleared" in message for _, message in plan_response.messages if message)
+    assert app.todo_manager.tasks()
+    assert any("TODO List" in message for _, message in plan_response.messages)
 
 
 def test_todo_persistence_across_sessions(

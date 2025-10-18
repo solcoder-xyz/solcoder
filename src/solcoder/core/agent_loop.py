@@ -117,39 +117,19 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
         ctx.render_message("agent", todo_render)
         rendered_roles.add("agent")
 
-    def _complete_todo(step_title: str | None) -> bool:
+    def _append_todo_instruction(step_title: str | None = None) -> None:
         if ctx.todo_manager is None:
-            return False
-        tasks = ctx.todo_manager.tasks()
-        if not tasks:
-            return False
-        open_tasks = [task for task in tasks if task.status != "done"]
+            return
+        open_tasks = [task for task in ctx.todo_manager.tasks() if task.status != "done"]
         if not open_tasks:
-            return False
-        if not step_title:
-            return False
-        needle = step_title.strip().lower()
-        contains = [task for task in open_tasks if needle in task.title.lower()]
-        equals = [task for task in open_tasks if task.title.strip().lower() == needle]
-        if len(equals) == 1:
-            target = equals[0]
-        elif len(contains) == 1:
-            target = contains[0]
-        else:
-            target = open_tasks[0]
-        try:
-            ctx.todo_manager.mark_complete(target.id, expected_revision=ctx.todo_manager.revision)
-        except ValueError:
-            return False
-        message = f"Marked TODO '{target.title}' complete."
-        display_messages.append(("system", message))
-        ctx.render_message("system", message)
-        rendered_roles.add("system")
-        todo_render = ctx.todo_manager.render()
-        display_messages.append(("agent", todo_render))
-        ctx.render_message("agent", todo_render)
-        rendered_roles.add("agent")
-        return True
+            return
+        next_task = open_tasks[0]
+        instruction = (
+            "TODO reminder: Review the pending checklist items before continuing. "
+            f"Next pending task: {next_task.id} — {next_task.title}. "
+            "If the task is complete, call the appropriate todo_* tool to update its status."
+        )
+        loop_history.append({"role": "system", "content": instruction})
 
     def _bootstrap_plan_into_todo(steps: list[str] | None) -> bool:
         if ctx.todo_manager is None or not steps:
@@ -189,17 +169,6 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
             return
         remaining = [task for task in tasks if task.status != "done"]
         if remaining:
-            auto_completed = True
-            for task in list(remaining):
-                try:
-                    ctx.todo_manager.mark_complete(task.id, expected_revision=ctx.todo_manager.revision)
-                except ValueError:
-                    auto_completed = False
-                    break
-            if auto_completed:
-                tasks = ctx.todo_manager.tasks()
-                remaining = [task for task in tasks if task.status != "done"]
-        if remaining:
             if ctx.todo_manager.acknowledged:
                 return
             reminder = (
@@ -212,22 +181,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
             rendered_roles.add("system")
             ctx.todo_manager.acknowledge()
         else:
-            render_before = ctx.todo_manager.render()
-            summary: str
-            try:
-                ctx.todo_manager.clear(expected_revision=ctx.todo_manager.revision)
-            except ValueError:
-                summary = (
-                    "All TODO items are complete, but the list changed before it could be cleared.\n"
-                    f"{render_before}\n"
-                    "Review the remaining items with `/todo list`."
-                )
-            else:
-                summary = (
-                    "All TODO items are complete. 🎉\n"
-                    f"{render_before}\n"
-                    "TODO list cleared for the next run."
-                )
+            summary = (
+                "All TODO items are complete. 🎉\n"
+                f"{ctx.todo_manager.render()}\n"
+                "Tip: Run `/todo clear` to archive or reset when you're ready."
+            )
             display_messages.append(("system", summary))
             ctx.render_message("system", summary)
             rendered_roles.add("system")
@@ -376,11 +334,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                     display_messages.append(("agent", preview))
                     ctx.render_message("agent", preview)
                     rendered_roles.add("agent")
-                    completed = False
-                    if status == "success":
-                        completed = _complete_todo(step_title)
-                    if not completed:
-                        _maybe_render_todo(payload_data)
+                    _maybe_render_todo(payload_data)
+                    _append_todo_instruction(step_title)
 
                     summary_entry: dict[str, Any] = {
                         "type": "tool",
