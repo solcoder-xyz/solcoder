@@ -157,16 +157,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         if not existing_tasks and len(cleaned_steps) < 2:
             return False
         existing_titles = {_todo_normalize_title(task.title) for task in existing_tasks}
-        existing_list = list(existing_titles)
         added = False
         for step in cleaned_steps:
             normalized_title = _todo_normalize_title(step)
-            if any(
-                normalized_title == existing
-                or normalized_title in existing
-                or existing in normalized_title
-                for existing in existing_list
-            ):
+            if normalized_title in existing_titles:
                 continue
             try:
                 ctx.todo_manager.create_task(
@@ -176,7 +170,6 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
             except ValueError:
                 continue
             existing_titles.add(normalized_title)
-            existing_list.append(normalized_title)
             added = True
         if not existing_tasks and not added:
             return False
