@@ -153,6 +153,15 @@ class TodoManager:
         return [task.to_dict() for task in self._tasks]
 
     def render(self, *, empty_message: str = "No open tasks.") -> str:
+        """Render TODO list as a Rich-compatible format marker.
+
+        Returns a special marker that tells the renderer to use create_todo_panel().
+        """
+        # Return a special marker that the app can detect and replace with a Rich panel
+        return "[[RENDER_TODO_PANEL]]"
+
+    def render_plain(self, *, empty_message: str = "No open tasks.") -> str:
+        """Legacy plain-text rendering for backward compatibility."""
         lines = ["TODO List", "---------"]
         if not self._tasks:
             lines.append(empty_message)

@@ -1,4 +1,3 @@
-
 """Interactive CLI shell for SolCoder."""
 
 from __future__ import annotations
@@ -14,14 +13,21 @@ from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.text import Text
 
-from solcoder.core.context import ContextManager
-from solcoder.cli.branding import SOLCODER_THEME, render_banner, themed_console
+from solcoder.cli.branding import (
+    SOLCODER_THEME,
+    create_chat_panel,
+    create_todo_panel,
+    render_banner,
+    themed_console,
+)
 from solcoder.cli.commands import register_builtin_commands
-from solcoder.cli.stub_llm import StubLLM
 from solcoder.cli.status_bar import StatusBar
+from solcoder.cli.stub_llm import StubLLM
 from solcoder.cli.types import CommandResponse, CommandRouter, LLMBackend
 from solcoder.cli.wallet_prompts import prompt_secret, prompt_text
 from solcoder.core import ConfigContext, ConfigManager
@@ -30,12 +36,13 @@ from solcoder.core.agent_loop import (
     AgentLoopContext,
     run_agent_loop,
 )
-from solcoder.core.todo import TodoManager
+from solcoder.core.context import ContextManager
 from solcoder.core.llm import LLMError
 from solcoder.core.logs import LogBuffer, LogEntry
+from solcoder.core.todo import TodoManager
 from solcoder.core.tool_registry import (
-    ToolRegistry,
     ToolkitAlreadyRegisteredError,
+    ToolRegistry,
     build_default_registry,
 )
 from solcoder.core.tools.todo import todo_toolkit
@@ -46,34 +53,88 @@ from solcoder.solana import SolanaRPCClient, WalletError, WalletManager, WalletS
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_HISTORY_PATH = Path(os.environ.get("SOLCODER_HOME", Path.home() / ".solcoder")) / "history"
+DEFAULT_HISTORY_PATH = (
+    Path(os.environ.get("SOLCODER_HOME", Path.home() / ".solcoder")) / "history"
+)
 DEFAULT_AGENT_MODE = os.environ.get("SOLCODER_AGENT_MODE", "assistive")
 
 
 class _StatusContext:
-    def __init__(self, app: "CLIApp", initial: Any) -> None:
+    def __init__(self, app: CLIApp, initial: Any, spinner: str = "dots") -> None:
         self._app = app
+        self._spinner_name = spinner
         self._last: Any = None
-        if initial:
-            self.update(initial)
+        self._live: Live | None = None
+        self._current_message: Any = initial
 
-    def __enter__(self) -> "_StatusContext":
+        if initial:
+            self._start_spinner(initial)
+
+    def __enter__(self) -> _StatusContext:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:  # pragma: no cover - nothing to clean up
-        return None
+    def __exit__(
+        self, exc_type, exc, tb
+    ) -> None:
+        if self._live:
+            self._live.stop()
+            self._live = None
 
     def update(self, message: Any) -> None:
         if not message or message == self._last:
             return
         self._last = message
-        self._app._print_rich(message)
+        self._current_message = message
+
+        if self._live:
+            # Update the spinner with new message
+            spinner_text = Text()
+            spinner_text.append("⚡ ", style="bold #14F195")
+            if isinstance(message, Text):
+                spinner_text.append_text(message)
+            else:
+                spinner_text.append(str(message), style="solcoder.status.text")
+
+            spinner = Spinner(self._spinner_name, text=spinner_text, style="solcoder.status.spinner")
+            self._live.update(spinner)
+        else:
+            self._start_spinner(message)
+
+    def _start_spinner(self, message: Any) -> None:
+        """Start the live spinner display."""
+        spinner_text = Text()
+        spinner_text.append("⚡ ", style="bold #14F195")
+        if isinstance(message, Text):
+            spinner_text.append_text(message)
+        else:
+            spinner_text.append(str(message), style="solcoder.status.text")
+
+        spinner = Spinner(self._spinner_name, text=spinner_text, style="solcoder.status.spinner")
+
+        # Use the app's console to create the Live display
+        app = getattr(self._app.session, "app", None)
+        is_running = (
+            bool(getattr(app, "is_running", False)) if app is not None else False
+        )
+
+        if is_running:
+            # When inside patch_stdout(), render to sys.__stdout__
+            from io import StringIO
+
+            # We can't use Live with StringIO easily, so just print a simple status
+            output = f"⚡ {str(message)}\n"
+            sys.__stdout__.write(output)
+            sys.__stdout__.flush()
+        else:
+            # Outside patch_stdout(), use normal Rich Live spinner
+            self._live = Live(spinner, console=self._app._console, refresh_per_second=10)
+            self._live.start()
 
 
 class _ConsoleProxy:
     """Proxy that routes print() through CLIApp-aware renderer while delegating everything else."""
 
-    def __init__(self, app: "CLIApp", console: Console) -> None:
+    def __init__(self, app: CLIApp, console: Console) -> None:
         self._app = app
         self._console = console
 
@@ -81,10 +142,12 @@ class _ConsoleProxy:
         self._app._print_rich(*objects, **kwargs)
 
     def status(self, status: Any, *args: Any, **kwargs: Any) -> _StatusContext:
-        return _StatusContext(self._app, status)
+        spinner = kwargs.get("spinner", "dots")
+        return _StatusContext(self._app, status, spinner=spinner)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._console, name)
+
 
 class CLIApp:
     """Interactive shell orchestrating slash commands and chat flow."""
@@ -103,14 +166,16 @@ class CLIApp:
         tool_registry: ToolRegistry | None = None,
     ) -> None:
         base_console = console or CLIApp._default_console()
-        if console is not None and not getattr(base_console, "_solcoder_theme_applied", False):
+        if console is not None and not getattr(
+            base_console, "_solcoder_theme_applied", False
+        ):
             base_console.push_theme(SOLCODER_THEME)
-            setattr(base_console, "_solcoder_theme_applied", True)
+            base_console._solcoder_theme_applied = True
         self._console = base_console
-        self._pt_console = themed_console(force_terminal=True, color_system="standard")
-        setattr(self._pt_console, "_solcoder_theme_applied", True)
         self.console = _ConsoleProxy(self, base_console)
-        self._color_enabled = bool(self._console.is_terminal and not getattr(self._console, "no_color", False))
+        self._color_enabled = bool(
+            self._console.is_terminal and not getattr(self._console, "no_color", False)
+        )
         self.config_context = config_context
         self.config_manager = config_manager
         self.session_manager = session_manager or SessionManager()
@@ -119,7 +184,9 @@ class CLIApp:
         self.rpc_client = rpc_client
         self._master_passphrase = getattr(config_context, "passphrase", None)
         history_path = history_path or (
-            self.session_manager.root / self.session_context.metadata.session_id / "history"
+            self.session_manager.root
+            / self.session_context.metadata.session_id
+            / "history"
         )
         history_path.parent.mkdir(parents=True, exist_ok=True)
         self.command_router = CommandRouter()
@@ -139,7 +206,9 @@ class CLIApp:
             workspace_resolver=self._resolve_workspace_path,
             agent_mode_resolver=self._resolve_agent_mode,
         )
-        bottom_toolbar = self.status_bar.toolbar if self.status_bar.supports_toolbar else None
+        bottom_toolbar = (
+            self.status_bar.toolbar if self.status_bar.supports_toolbar else None
+        )
         self.session = PromptSession(
             history=FileHistory(str(history_path)),
             bottom_toolbar=bottom_toolbar,
@@ -154,10 +223,13 @@ class CLIApp:
             logger.debug("Todo toolkit already registered; skipping duplicate add.")
         initial_status = self.wallet_manager.status()
         initial_balance = fetch_balance(self.rpc_client, initial_status.public_key)
-        update_wallet_metadata(self.session_context.metadata, initial_status, balance=initial_balance)
+        update_wallet_metadata(
+            self.session_context.metadata, initial_status, balance=initial_balance
+        )
         network_name = (
             self.config_context.config.network
-            if self.config_context is not None and hasattr(self.config_context, "config")
+            if self.config_context is not None
+            and hasattr(self.config_context, "config")
             else "unknown"
         )
         self.log_event(
@@ -194,9 +266,13 @@ class CLIApp:
         wallet_status = metadata.wallet_status or ""
         if wallet_status:
             if "Unlocked" in wallet_status:
-                lines.append("[#14F195]🔓 Wallet unlocked with your SolCoder passphrase.[/]")
+                lines.append(
+                    "[#14F195]🔓 Wallet unlocked with your SolCoder passphrase.[/]"
+                )
             elif "Locked" in wallet_status:
-                lines.append("[#F472B6]🔒 Wallet locked. Use `/wallet unlock` to access.[/]")
+                lines.append(
+                    "[#F472B6]🔒 Wallet locked. Use `/wallet unlock` to access.[/]"
+                )
         balance = metadata.wallet_balance
         if balance is not None:
             lines.append(f"[#14F195]💰 Balance[/]: [#E6FFFA]{balance:.3f} SOL")
@@ -211,7 +287,7 @@ class CLIApp:
             )
         )
         self.console.print()
-        with patch_stdout():
+        with patch_stdout(raw=True):
             while True:
                 try:
                     user_input = self.session.prompt(self._prompt_message())
@@ -242,7 +318,7 @@ class CLIApp:
             return CommandResponse(messages=[])
 
         self.context_manager.record("user", raw_line)
-        self._render_message("user", raw_line)
+        # Don't render user message - it's already visible in the prompt
 
         if raw_line.startswith("/"):
             logger.debug("Processing slash command: %s", raw_line)
@@ -259,7 +335,9 @@ class CLIApp:
         self._refresh_status_bar()
         return response
 
-    def log_event(self, category: str, message: str, *, severity: str = "info") -> LogEntry:
+    def log_event(
+        self, category: str, message: str, *, severity: str = "info"
+    ) -> LogEntry:
         """Record an operational event in the shared log buffer."""
         return self.log_buffer.record(category, message, severity=severity)
 
@@ -290,7 +368,9 @@ class CLIApp:
             logger.error("LLM error: %s", exc)
             return CommandResponse(messages=[("system", f"LLM error: {exc}")])
 
-    def _update_llm_settings(self, *, model: str | None = None, reasoning: str | None = None) -> None:
+    def _update_llm_settings(
+        self, *, model: str | None = None, reasoning: str | None = None
+    ) -> None:
         if self.config_context is None:
             return
         if model:
@@ -320,27 +400,29 @@ class CLIApp:
     # Rendering helpers
     # ------------------------------------------------------------------
     def _render_message(self, role: str, message: str) -> None:
-        if role == "user":
-            header = Text.from_markup("[#A855F7]🟣 You[/]")
-            body_style = "solcoder.user.text"
-        elif role == "agent":
-            header = Text.from_markup("[#14F195]🟢 SolCoder[/]")
-            body_style = "solcoder.agent.text"
-        else:
-            header = Text.from_markup(f"[#F472B6]🔔 {role.title()}[/]")
-            body_style = "solcoder.system.text"
+        """Render a chat message using modern Rich panels."""
+        # Check if this is a TODO panel render request
+        if "[[RENDER_TODO_PANEL]]" in message:
+            # Render the TODO list as a Rich panel
+            tasks = self.todo_manager.as_dicts()
+            todo_panel = create_todo_panel(tasks)
+            self.console.print(todo_panel)
 
-        self.console.print(header)
+            # If there's other content in the message, render it too
+            other_content = message.replace("[[RENDER_TODO_PANEL]]", "").strip()
+            if other_content:
+                panel = create_chat_panel(role, other_content, use_markdown=False)
+                self.console.print(panel)
+            return
 
-        body = Text()
-        lines = message.splitlines() or [""]
-        for idx, line in enumerate(lines):
-            body.append("  ", style="dim")
-            body.append(line, style=body_style)
-            if idx != len(lines) - 1:
-                body.append("\n")
-        self.console.print(body)
-        self.console.print()
+        # Detect markdown for agent responses
+        use_markdown = role == "agent" and (
+            "```" in message or "**" in message or "`" in message
+        )
+
+        # Create and print the panel
+        panel = create_chat_panel(role, message, use_markdown=use_markdown)
+        self.console.print(panel)
 
     def _render_status(self) -> None:
         if self.status_bar.supports_toolbar:
@@ -364,9 +446,10 @@ class CLIApp:
     def _render_banner(self) -> None:
         render_banner(self.console, animate=self._color_enabled)
 
-    def _prompt_message(self) -> str:
+    def _prompt_message(self) -> ANSI | str:
         if not self._color_enabled:
             return "➤ "
+        # Use ANSI wrapper for proper cursor positioning with color codes
         return ANSI("\x1b[38;2;168;85;247m➤\x1b[0m ")
 
     def _default_template_metadata(self) -> dict[str, str]:
@@ -381,7 +464,9 @@ class CLIApp:
                 pass
         return {"program_name": program_name, "author_pubkey": author_pubkey}
 
-    def _prompt_secret(self, message: str, *, confirmation: bool = False, allow_master: bool = True) -> str:
+    def _prompt_secret(
+        self, message: str, *, confirmation: bool = False, allow_master: bool = True
+    ) -> str:
         return prompt_secret(
             self.session,
             self.console,
@@ -394,7 +479,9 @@ class CLIApp:
     def _prompt_text(self, message: str) -> str:
         return prompt_text(self.session, message)
 
-    def _update_wallet_metadata(self, status: WalletStatus, *, balance: float | None) -> None:
+    def _update_wallet_metadata(
+        self, status: WalletStatus, *, balance: float | None
+    ) -> None:
         update_wallet_metadata(self.session_context.metadata, status, balance=balance)
         self._refresh_status_bar()
 
@@ -423,7 +510,11 @@ class CLIApp:
             candidate = candidate.expanduser()
         try:
             home = Path.home()
-            return f"~/{candidate.relative_to(home)}" if candidate.is_relative_to(home) else str(candidate)
+            return (
+                f"~/{candidate.relative_to(home)}"
+                if candidate.is_relative_to(home)
+                else str(candidate)
+            )
         except ValueError:
             return str(candidate)
 
@@ -435,14 +526,31 @@ class CLIApp:
         self._refresh_status_bar()
 
     def _print_rich(self, *objects: Any, **kwargs: Any) -> None:
+        """Print using Rich console, handling both REPL and non-REPL contexts."""
         app = getattr(self.session, "app", None)
-        is_running = bool(getattr(app, "is_running", False)) if app is not None else False
+        is_running = (
+            bool(getattr(app, "is_running", False)) if app is not None else False
+        )
+
         if is_running:
-            with self._pt_console.capture() as capture:
-                self._pt_console.print(*objects, **kwargs)
-            rendered = capture.get()
-            if rendered:
-                app.print_text(ANSI(rendered))
+            # When inside patch_stdout(), use sys.__stdout__ (the true original)
+            from io import StringIO
+
+            buffer = StringIO()
+            temp_console = Console(
+                file=buffer,
+                force_terminal=True,
+                width=self._console.width or 120,
+                legacy_windows=False,
+                force_interactive=False,
+            )
+            temp_console.push_theme(SOLCODER_THEME)
+            temp_console.print(*objects, **kwargs)
+            output = buffer.getvalue()
+            if output:
+                # Write to sys.__stdout__ which is never patched by prompt_toolkit
+                sys.__stdout__.write(output)
+                sys.__stdout__.flush()
         else:
             self._console.print(*objects, **kwargs)
 
@@ -453,7 +561,11 @@ class CLIApp:
         if not state:
             return
         tasks = state.get("tasks") or []
-        unfinished = [task for task in tasks if isinstance(task, dict) and task.get("status") != "done"]
+        unfinished = [
+            task
+            for task in tasks
+            if isinstance(task, dict) and task.get("status") != "done"
+        ]
         if unfinished and not self._should_import_todo(len(unfinished)):
             logger.debug("Skipping import of %s unfinished TODO items", len(unfinished))
             return
@@ -494,20 +606,27 @@ class CLIApp:
                 state = self.todo_manager.dump_state()
             except Exception:  # noqa: BLE001
                 state = {"tasks": [], "revision": 0, "acknowledged": True}
-            self.session_manager.save_todo(self.session_context.metadata.session_id, state)
+            self.session_manager.save_todo(
+                self.session_context.metadata.session_id, state
+            )
 
     @staticmethod
     def _default_console() -> Console:
         force_style = os.environ.get("SOLCODER_FORCE_COLOR")
-        no_color = os.environ.get("SOLCODER_NO_COLOR") is not None or os.environ.get("NO_COLOR") is not None
+        no_color = (
+            os.environ.get("SOLCODER_NO_COLOR") is not None
+            or os.environ.get("NO_COLOR") is not None
+        )
         if force_style:
             console = themed_console(force_terminal=True)
-            setattr(console, "_solcoder_theme_applied", True)
+            console._solcoder_theme_applied = True
             return console
         if no_color or not sys.stdout.isatty():
-            console = themed_console(no_color=True, force_terminal=False, color_system=None)
-            setattr(console, "_solcoder_theme_applied", True)
+            console = themed_console(
+                no_color=True, force_terminal=False, color_system=None
+            )
+            console._solcoder_theme_applied = True
             return console
         console = themed_console()
-        setattr(console, "_solcoder_theme_applied", True)
+        console._solcoder_theme_applied = True
         return console

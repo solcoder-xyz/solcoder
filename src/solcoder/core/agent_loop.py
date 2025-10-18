@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from rich.console import Console
+from rich.text import Text
 
 from solcoder.core import (
     AgentMessageError,
@@ -17,7 +18,8 @@ from solcoder.core import (
     manifest_to_prompt_section,
     parse_agent_directive,
 )
-from solcoder.core.todo import TodoManager, _normalize_title as _todo_normalize_title
+from solcoder.core.todo import TodoManager
+from solcoder.core.todo import _normalize_title as _todo_normalize_title
 from solcoder.core.tool_registry import ToolRegistry, ToolRegistryError
 from solcoder.session import SessionMetadata
 
@@ -34,7 +36,7 @@ class AgentLoopContext:
 
     prompt: str
     history: Sequence[dict[str, str]]
-    llm: "LLMBackend"
+    llm: LLMBackend
     tool_registry: ToolRegistry
     console: Console
     config_context: ConfigContext | None
@@ -45,9 +47,11 @@ class AgentLoopContext:
     max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS
 
 
-def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
+def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     """Execute the agent loop using the provided context."""
-    from solcoder.cli.types import CommandResponse  # Local import to avoid circular dependency
+    from solcoder.cli.types import (
+        CommandResponse,  # Local import to avoid circular dependency
+    )
 
     manifest = build_tool_manifest(ctx.tool_registry)
     manifest_json = manifest_to_prompt_section(manifest)
@@ -68,7 +72,9 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
     all_cached = True
     retry_payload: str | None = None
 
-    provider_name, model_name, reasoning_effort = _active_model_details(ctx.config_context)
+    provider_name, model_name, reasoning_effort = _active_model_details(
+        ctx.config_context
+    )
 
     def _accumulate_usage(result: Any) -> None:
         nonlocal total_latency, total_input_tokens, total_output_tokens, last_finish_reason, all_cached
@@ -82,9 +88,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
         if not token_usage:
             return
         input_tokens = int(
-            token_usage.get("input_tokens")
-            or token_usage.get("prompt_tokens")
-            or 0
+            token_usage.get("input_tokens") or token_usage.get("prompt_tokens") or 0
         )
         output_tokens = int(
             token_usage.get("output_tokens")
@@ -103,7 +107,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
 
     iteration = 0
     cancelled = False
-    status_message = "[cyan]Thinking…[/cyan]"
+    status_message = Text("Thinking…", style="solcoder.status.text")
 
     def _maybe_render_todo(payload: Any) -> None:
         if not isinstance(payload, dict):
@@ -120,7 +124,9 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
     def _append_todo_instruction(step_title: str | None = None) -> None:
         if ctx.todo_manager is None:
             return
-        open_tasks = [task for task in ctx.todo_manager.tasks() if task.status != "done"]
+        open_tasks = [
+            task for task in ctx.todo_manager.tasks() if task.status != "done"
+        ]
         if not open_tasks:
             return
         next_task = open_tasks[0]
@@ -249,12 +255,16 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                         plan_received = True
                         auto_rendered = _bootstrap_plan_into_todo(directive.steps)
                         if not auto_rendered:
-                            plan_text = _format_plan_message(directive.steps or [], directive.message)
+                            plan_text = _format_plan_message(
+                                directive.steps or [], directive.message
+                            )
                             display_messages.append(("agent", plan_text))
                             ctx.render_message("agent", plan_text)
                             rendered_roles.add("agent")
                         if directive.steps:
-                            status_message = f"[cyan]{directive.steps[0]}[/cyan]"
+                            status_message = Text(
+                                directive.steps[0], style="solcoder.status.text"
+                            )
                         pending_prompt = AGENT_PLAN_ACK
                         continue
                     if directive.type == "reply":
@@ -275,15 +285,17 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                         display_messages.append(("agent", final_message))
                         ctx.render_message("agent", final_message)
                         rendered_roles.add("agent")
-                        status_message = "[cyan]Thinking…[/cyan]"
+                        status_message = Text("Thinking…", style="solcoder.status.text")
                         _handle_completion_todo()
                         break
                     if directive.type == "cancel":
-                        cancel_message = directive.message or "Agent cancelled the request."
+                        cancel_message = (
+                            directive.message or "Agent cancelled the request."
+                        )
                         display_messages.append(("system", cancel_message))
                         ctx.render_message("system", cancel_message)
                         rendered_roles.add("system")
-                        status_message = "[cyan]Thinking…[/cyan]"
+                        status_message = Text("Thinking…", style="solcoder.status.text")
                         _handle_completion_todo()
                         break
                     pending_prompt = json.dumps(
@@ -298,12 +310,16 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
 
                 if directive.type == "plan":
                     if not _bootstrap_plan_into_todo(directive.steps):
-                        plan_text = _format_plan_message(directive.steps or [], directive.message)
+                        plan_text = _format_plan_message(
+                            directive.steps or [], directive.message
+                        )
                         display_messages.append(("agent", plan_text))
                         ctx.render_message("agent", plan_text)
                         rendered_roles.add("agent")
                     if directive.steps:
-                        status_message = f"[cyan]{directive.steps[0]}[/cyan]"
+                        status_message = Text(
+                            directive.steps[0], style="solcoder.status.text"
+                        )
                     pending_prompt = AGENT_PLAN_ACK
                     continue
 
@@ -311,7 +327,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                     tool_name = directive.tool.name
                     step_title = directive.step_title or tool_name
                     tool_args = directive.tool.args
-                    status_message = f"[cyan]{step_title}[/cyan]"
+                    status_message = Text(step_title, style="solcoder.status.text")
                     status_indicator.update(status_message)
                     try:
                         tool_result = ctx.tool_registry.invoke(tool_name, tool_args)
@@ -361,7 +377,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                     display_messages.append(("agent", final_message))
                     ctx.render_message("agent", final_message)
                     rendered_roles.add("agent")
-                    status_message = "[cyan]Thinking…[/cyan]"
+                    status_message = Text("Thinking…", style="solcoder.status.text")
                     _handle_completion_todo()
                     break
 
@@ -370,7 +386,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                     display_messages.append(("system", cancel_message))
                     ctx.render_message("system", cancel_message)
                     rendered_roles.add("system")
-                    status_message = "[cyan]Thinking…[/cyan]"
+                    status_message = Text("Thinking…", style="solcoder.status.text")
                     _handle_completion_todo()
                     break
         except KeyboardInterrupt:
@@ -379,15 +395,21 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
             display_messages.append(("system", cancel_message))
             ctx.render_message("system", cancel_message)
             rendered_roles.add("system")
-            status_message = "[cyan]Thinking…[/cyan]"
+            status_message = Text("Thinking…", style="solcoder.status.text")
 
     if not display_messages:
         if cancelled:
             display_messages.append(("system", "Agent loop cancelled."))
         else:
-            display_messages.append(("system", "No response generated from the agent loop."))
+            display_messages.append(
+                ("system", "No response generated from the agent loop.")
+            )
 
-    if iteration >= ctx.max_iterations and not cancelled and display_messages[-1][0] != "system":
+    if (
+        iteration >= ctx.max_iterations
+        and not cancelled
+        and display_messages[-1][0] != "system"
+    ):
         timeout_message = "Agent loop stopped after reaching the iteration limit."
         display_messages.append(("system", timeout_message))
         ctx.render_message("system", timeout_message)
@@ -434,7 +456,9 @@ def _active_model_details(config_context: ConfigContext | None) -> tuple[str, st
     return provider_name, model_name, reasoning_effort
 
 
-def _agent_system_prompt(config_context: ConfigContext | None, manifest_json: str) -> str:
+def _agent_system_prompt(
+    config_context: ConfigContext | None, manifest_json: str
+) -> str:
     provider_name, model_name, reasoning_effort = _active_model_details(config_context)
     schema_description = (
         "Schema:\n"
@@ -487,4 +511,9 @@ def _format_tool_preview(step_title: str, content: str) -> str:
     return f"{step_title}\n{content}"
 
 
-__all__ = ["AgentLoopContext", "AGENT_PLAN_ACK", "DEFAULT_AGENT_MAX_ITERATIONS", "run_agent_loop"]
+__all__ = [
+    "AgentLoopContext",
+    "AGENT_PLAN_ACK",
+    "DEFAULT_AGENT_MAX_ITERATIONS",
+    "run_agent_loop",
+]
