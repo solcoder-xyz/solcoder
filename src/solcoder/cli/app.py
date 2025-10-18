@@ -226,6 +226,7 @@ class CLIApp:
         update_wallet_metadata(
             self.session_context.metadata, initial_status, balance=initial_balance
         )
+        self._awaiting_ctrl_c_confirm = False
         network_name = (
             self.config_context.config.network
             if self.config_context is not None
@@ -291,9 +292,14 @@ class CLIApp:
             while True:
                 try:
                     user_input = self.session.prompt(self._prompt_message())
+                    self._awaiting_ctrl_c_confirm = False
                 except KeyboardInterrupt:
-                    # User pressed Ctrl-C; ignore and prompt again.
-                    logger.debug("KeyboardInterrupt detected; ignoring")
+                    if self._awaiting_ctrl_c_confirm:
+                        self.console.print("Exiting SolCoder. Bye!")
+                        break
+                    self._awaiting_ctrl_c_confirm = True
+                    logger.debug("KeyboardInterrupt detected; awaiting confirmation")
+                    self.console.print("Press Ctrl-C again to exit SolCoder.")
                     continue
                 except EOFError:
                     self.console.print("Exiting SolCoder. Bye!")
