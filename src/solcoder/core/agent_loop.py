@@ -117,10 +117,20 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
     def _bootstrap_plan_into_todo(steps: list[str] | None) -> bool:
         if ctx.todo_manager is None or not steps:
             return False
-        ctx.todo_manager.clear()
+        existing_tasks = ctx.todo_manager.tasks()
+        existing_titles = {task.title.strip().lower() for task in existing_tasks}
+        added = False
         for step in steps:
-            if step and step.strip():
-                ctx.todo_manager.create_task(step.strip())
+            if not step or not step.strip():
+                continue
+            normalized = step.strip()
+            if normalized.lower() in existing_titles:
+                continue
+            ctx.todo_manager.create_task(normalized)
+            existing_titles.add(normalized.lower())
+            added = True
+        if not existing_tasks and not added:
+            return False
         todo_render = ctx.todo_manager.render()
         display_messages.append(("agent", todo_render))
         ctx.render_message("agent", todo_render)
