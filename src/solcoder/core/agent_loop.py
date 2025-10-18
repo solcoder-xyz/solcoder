@@ -171,10 +171,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                 continue
             existing_titles.add(normalized_title)
             added = True
-            todo_render_revision = -1
         if not existing_tasks and not added:
             return False
         todo_render = ctx.todo_manager.render()
+        nonlocal todo_render_revision
+        todo_render_revision = ctx.todo_manager.revision
         display_messages.append(("agent", todo_render))
         ctx.render_message("agent", todo_render)
         rendered_roles.add("agent")
