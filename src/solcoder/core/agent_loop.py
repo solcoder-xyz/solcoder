@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from rich.console import Console
@@ -73,6 +75,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     retry_payload: str | None = None
     todo_render_revision = -1
     should_exit = False
+    llm_log_dir = Path(".solcoder/logs/llm")
 
     provider_name, model_name, reasoning_effort = _active_model_details(
         ctx.config_context
@@ -106,6 +109,28 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         metadata.llm_output_tokens += output_tokens
         metadata.llm_last_input_tokens = input_tokens
         metadata.llm_last_output_tokens = output_tokens
+
+    def _log_llm_payload(
+        *, prompt: str, history: Sequence[dict[str, str]], system_prompt: str, iteration: int
+    ) -> None:
+        try:
+            llm_log_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+            session_id = ctx.session_metadata.session_id
+            filename = f"{timestamp}_iter{iteration:04d}_{session_id}.json"
+            payload = {
+                "session_id": session_id,
+                "timestamp": timestamp,
+                "iteration": iteration,
+                "system_prompt": system_prompt,
+                "prompt": prompt,
+                "history": list(history),
+            }
+            (llm_log_dir / filename).write_text(
+                json.dumps(payload, indent=2), encoding="utf-8"
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     iteration = 0
     cancelled = False
@@ -264,6 +289,12 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                 status_indicator.update(status_message)
                 tokens: list[str] = []
                 try:
+                    _log_llm_payload(
+                        prompt=pending_prompt,
+                        history=loop_history,
+                        system_prompt=system_prompt,
+                        iteration=iteration,
+                    )
                     result = ctx.llm.stream_chat(
                         pending_prompt,
                         history=loop_history,
