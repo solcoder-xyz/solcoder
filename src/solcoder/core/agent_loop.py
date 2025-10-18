@@ -189,6 +189,17 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
             return
         remaining = [task for task in tasks if task.status != "done"]
         if remaining:
+            auto_completed = True
+            for task in list(remaining):
+                try:
+                    ctx.todo_manager.mark_complete(task.id, expected_revision=ctx.todo_manager.revision)
+                except ValueError:
+                    auto_completed = False
+                    break
+            if auto_completed:
+                tasks = ctx.todo_manager.tasks()
+                remaining = [task for task in tasks if task.status != "done"]
+        if remaining:
             if ctx.todo_manager.acknowledged:
                 return
             reminder = (
