@@ -114,6 +114,19 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
         ctx.render_message("agent", todo_render)
         rendered_roles.add("agent")
 
+    def _bootstrap_plan_into_todo(steps: list[str] | None) -> bool:
+        if ctx.todo_manager is None or not steps:
+            return False
+        ctx.todo_manager.clear()
+        for step in steps:
+            if step and step.strip():
+                ctx.todo_manager.create_task(step.strip())
+        todo_render = ctx.todo_manager.render()
+        display_messages.append(("agent", todo_render))
+        ctx.render_message("agent", todo_render)
+        rendered_roles.add("agent")
+        return True
+
     with ctx.console.status(status_message, spinner="dots") as status_indicator:
         try:
             while iteration < ctx.max_iterations:
@@ -185,20 +198,23 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                         )
                         continue
                     plan_received = True
-                    plan_text = _format_plan_message(directive.steps or [], directive.message)
-                    display_messages.append(("agent", plan_text))
-                    ctx.render_message("agent", plan_text)
-                    rendered_roles.add("agent")
+                    auto_rendered = _bootstrap_plan_into_todo(directive.steps)
+                    if not auto_rendered:
+                        plan_text = _format_plan_message(directive.steps or [], directive.message)
+                        display_messages.append(("agent", plan_text))
+                        ctx.render_message("agent", plan_text)
+                        rendered_roles.add("agent")
                     if directive.steps:
                         status_message = f"[cyan]{directive.steps[0]}[/cyan]"
                     pending_prompt = AGENT_PLAN_ACK
                     continue
 
                 if directive.type == "plan":
-                    plan_text = _format_plan_message(directive.steps or [], directive.message)
-                    display_messages.append(("agent", plan_text))
-                    ctx.render_message("agent", plan_text)
-                    rendered_roles.add("agent")
+                    if not _bootstrap_plan_into_todo(directive.steps):
+                        plan_text = _format_plan_message(directive.steps or [], directive.message)
+                        display_messages.append(("agent", plan_text))
+                        ctx.render_message("agent", plan_text)
+                        rendered_roles.add("agent")
                     if directive.steps:
                         status_message = f"[cyan]{directive.steps[0]}[/cyan]"
                     pending_prompt = AGENT_PLAN_ACK

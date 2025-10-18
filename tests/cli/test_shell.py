@@ -188,7 +188,8 @@ def test_chat_message_invokes_llm(
     assert response.continue_loop is True
     assert response.messages and response.messages[0][0] == "agent"
     plan_message = response.messages[0][1]
-    assert "Stub plan" in plan_message
+    assert "TODO List" in plan_message
+    assert "Consider the request" in plan_message
     assert response.messages[-1][0] == "agent"
     assert "[stub] Completed request" in response.messages[-1][1]
     assert response.rendered_roles == {"agent"}
@@ -288,7 +289,8 @@ def test_agent_loop_recovers_from_invalid_json(
     assert llm.script == []
     assert all(role != "system" for role, _ in response.messages)
     assert response.messages[0][0] == "agent"
-    assert "Recovered plan" in response.messages[0][1]
+    assert "TODO List" in response.messages[0][1]
+    assert "Retry step" in response.messages[0][1]
     assert response.messages[-1][1].startswith("Recovered")
 
 
