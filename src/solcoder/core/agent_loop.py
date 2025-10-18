@@ -55,7 +55,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
     manifest = build_tool_manifest(ctx.tool_registry)
     manifest_json = manifest_to_prompt_section(manifest)
-    system_prompt = _agent_system_prompt(ctx.config_context, manifest_json)
+    system_prompt = _agent_system_prompt(ctx.config_context, manifest_json, ctx.todo_manager)
 
     loop_history = list(ctx.history)
     if ctx.initial_todo_message:
@@ -272,8 +272,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         pending_prompt = AGENT_PLAN_ACK
                         continue
                     if directive.type == "reply":
-                        has_tasks = bool(ctx.todo_manager and ctx.todo_manager.tasks())
-                        if has_tasks:
+                        has_unfinished = bool(
+                            ctx.todo_manager and ctx.todo_manager.has_unfinished_tasks()
+                        )
+                        if has_unfinished:
                             pending_prompt = json.dumps(
                                 {
                                     "type": "error",
@@ -380,6 +382,19 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     continue
 
                 if directive.type == "reply":
+                    has_unfinished = bool(
+                        ctx.todo_manager and ctx.todo_manager.has_unfinished_tasks()
+                    )
+                    if has_unfinished:
+                        pending_prompt = json.dumps(
+                            {
+                                "type": "error",
+                                "message": (
+                                    "Active TODO items detected. Provide a plan or update the TODO list before finishing."
+                                ),
+                            }
+                        )
+                        continue
                     final_message = directive.message or ""
                     if directive.step_title:
                         final_message = f"{directive.step_title}\n{final_message}"
@@ -467,7 +482,9 @@ def _active_model_details(config_context: ConfigContext | None) -> tuple[str, st
 
 
 def _agent_system_prompt(
-    config_context: ConfigContext | None, manifest_json: str
+    config_context: ConfigContext | None,
+    manifest_json: str,
+    todo_manager: TodoManager | None = None,
 ) -> str:
     provider_name, model_name, reasoning_effort = _active_model_details(config_context)
     schema_description = (
@@ -478,11 +495,8 @@ def _agent_system_prompt(
         '  "tool": {"name": string, "args": object}?,\n'
         '  "steps": string[]? }\n'
     )
-    return (
-        "You are SolCoder, an on-device coding assistant. Always respond with a single "
-        "JSON object that matches the schema below. Do not include Markdown or prose "
-        "outside the JSON value. Use compact JSON without extra commentary.\n\n"
-        f"{schema_description}"
+
+    rules = (
         "Rules:\n"
         "1. If a prompt can be satisfied immediately without tools or multi-step work, respond "
         '   directly with {"type":"reply","message":...}. Otherwise begin with '
@@ -504,7 +518,33 @@ def _agent_system_prompt(
         "strategy. When you want the CLI to show the checklist, set show_todo_list=true; otherwise "
         "leave it out to keep the list hidden.\n"
         "9. If the user indicates they want to end the conversation or close SolCoder, invoke the "
-        "quit tool to terminate the session gracefully, then acknowledge the shutdown with a final reply.\n\n"
+        "quit tool to terminate the session gracefully, then acknowledge the shutdown with a final reply.\n"
+    )
+
+    active_task = None
+    if todo_manager is not None:
+        current = todo_manager.active_task()
+        if current is not None:
+            active_task = f"{current.id}: {current.title}"
+
+    if active_task:
+        rules += (
+            "10. Current active task: "
+            f"{active_task}. Keep progress focused here and update or complete it before emitting your final reply.\n"
+        )
+    else:
+        rules += (
+            "10. If you begin multi-step work, set one TODO entry to in_progress and keep it updated until completion before replying.\n"
+        )
+
+    rules += "\n"
+
+    return (
+        "You are SolCoder, an on-device coding assistant. Always respond with a single "
+        "JSON object that matches the schema below. Do not include Markdown or prose "
+        "outside the JSON value. Use compact JSON without extra commentary.\n\n"
+        f"{schema_description}"
+        f"{rules}"
         f"Current configuration: provider={provider_name}, model={model_name}, "
         f"reasoning_effort={reasoning_effort}.\n"
         f"Available tools: {manifest_json}\n"
