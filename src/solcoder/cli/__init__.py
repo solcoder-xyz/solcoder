@@ -30,6 +30,7 @@ from solcoder.solana import SolanaRPCClient, WalletError, WalletManager
 
 from .app import CLIApp
 from .template_utils import parse_template_tokens
+from .branding import themed_console
 
 typer.rich_utils.USE_RICH = False
 
@@ -79,6 +80,14 @@ typer.rich_utils._print_options_panel = _compat_print_options_panel  # type: ign
 
 app = typer.Typer(invoke_without_command=True, help="SolCoder CLI agent", no_args_is_help=False)
 
+CLI_CONSOLE = themed_console()
+setattr(CLI_CONSOLE, "_solcoder_theme_applied", True)
+
+
+def styled_echo(message: str = "", *, nl: bool = True) -> None:
+    """Print using the SolCoder themed console."""
+    CLI_CONSOLE.print(message, end="" if not nl else "\n")
+
 
 def _env_flag(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
@@ -115,7 +124,7 @@ def _parse_direct_launch_args(args: list[str]) -> tuple[bool, str | None, bool, 
             continue
         if arg == "--session":
             if i + 1 >= len(args):
-                typer.echo("❌ Option '--session' requires a session id.")
+                styled_echo("❌ Option '--session' requires a session id.")
                 raise typer.Exit(code=2)
             session = args[i + 1]
             i += 2
@@ -126,7 +135,7 @@ def _parse_direct_launch_args(args: list[str]) -> tuple[bool, str | None, bool, 
             continue
         if arg == "--config":
             if i + 1 >= len(args):
-                typer.echo("❌ Option '--config' requires a file path.")
+                styled_echo("❌ Option '--config' requires a file path.")
                 raise typer.Exit(code=2)
             config_path = Path(args[i + 1]).expanduser()
             i += 2
@@ -145,14 +154,14 @@ def _render_template_cli(template_name: str, tokens: list[str]) -> None:
     defaults = {"program_name": template_name, "author_pubkey": "CHANGEME"}
     options, error = parse_template_tokens(template_name, tokens, defaults)
     if error or options is None:
-        typer.echo(f"❌ {error or 'Unable to render template.'}")
+        styled_echo(f"❌ {error or 'Unable to render template.'}")
         raise typer.Exit(code=2)
     try:
         output = render_template(options)
     except TemplateError as exc:
-        typer.echo(f"❌ {exc}")
+        styled_echo(f"❌ {exc}")
         raise typer.Exit(code=1)
-    typer.echo(f"✅ Template '{template_name}' rendered to {output}")
+    styled_echo(f"✅ Template '{template_name}' rendered to {output}")
 
 
 def _configure_logging(verbose: bool, log_dir: Path | None) -> None:
@@ -222,7 +231,7 @@ def _candidate_session_roots() -> list[Path]:
 def _handle_dump_session(session_id: str, fmt: str, output: Path | None) -> None:
     fmt_normalized = fmt.lower()
     if fmt_normalized not in {"json", "text"}:
-        typer.echo(f"❌ Unsupported dump format '{fmt}'. Use 'json' or 'text'.")
+        styled_echo(f"❌ Unsupported dump format '{fmt}'. Use 'json' or 'text'.")
         raise typer.Exit(code=1)
 
     export_data: dict[str, object] | None = None
@@ -239,16 +248,16 @@ def _handle_dump_session(session_id: str, fmt: str, output: Path | None) -> None
         if export_data is None:
             raise FileNotFoundError
     except FileNotFoundError:
-        typer.echo(
+        styled_echo(
             f"⚠️ Session '{session_id}' not found. Only the most recent {MAX_SESSIONS} sessions are retained."
         )
         if searched_roots:
             locations = ", ".join(str(path) for path in searched_roots)
-            typer.echo(f"   Checked locations: {locations}")
-        typer.echo("   Start a new session or increase retention via MAX_SESSIONS if needed.")
+            styled_echo(f"   Checked locations: {locations}")
+        styled_echo("   Start a new session or increase retention via MAX_SESSIONS if needed.")
         raise typer.Exit(code=1)
     except SessionLoadError as exc:
-        typer.echo(f"❌ Failed to load session '{session_id}': {exc}")
+        styled_echo(f"❌ Failed to load session '{session_id}': {exc}")
         raise typer.Exit(code=1)
 
     if fmt_normalized == "json":
@@ -264,9 +273,9 @@ def _handle_dump_session(session_id: str, fmt: str, output: Path | None) -> None
             os.chmod(destination, 0o600)
         except PermissionError:
             pass
-        typer.echo(f"✅ Session {session_id} exported to {destination}")
+        styled_echo(f"✅ Session {session_id} exported to {destination}")
     else:
-        typer.echo(payload)
+        styled_echo(payload)
 
     raise typer.Exit()
 
@@ -286,9 +295,9 @@ def _show_balance(rpc_client: SolanaRPCClient | None, public_key: str | None) ->
     try:
         balance = rpc_client.get_balance(public_key)
     except Exception as exc:  # noqa: BLE001
-        typer.echo(f"⚠️  Unable to fetch wallet balance ({exc}).")
+        styled_echo(f"[solcoder.log.warn]⚠️  Unable to fetch wallet balance[/] ({exc}).")
         return
-    typer.echo(f"💰 Balance: {balance:.3f} SOL")
+    styled_echo(f"[#14F195]💰 Balance[/]: [#E6FFFA]{balance:.3f} SOL")
 
 
 def _prompt_unlock(wallet_manager: WalletManager) -> None:
@@ -297,14 +306,14 @@ def _prompt_unlock(wallet_manager: WalletManager) -> None:
         passphrase = typer.prompt("Wallet passphrase", hide_input=True)
         try:
             wallet_manager.unlock_wallet(passphrase)
-            typer.echo("🔓 Wallet unlocked.")
+            styled_echo("🔓 Wallet unlocked.")
             return
         except WalletError:
             attempts -= 1
             if attempts > 0:
-                typer.echo(f"❌ Incorrect passphrase. {attempts} attempts remaining.")
+                styled_echo(f"❌ Incorrect passphrase. {attempts} attempts remaining.")
             else:
-                typer.echo("⚠️  Wallet remains locked.")
+                styled_echo("⚠️  Wallet remains locked.")
 
 
 def _bootstrap_wallet(
@@ -319,11 +328,11 @@ def _bootstrap_wallet(
         return master_passphrase
 
     if not wallet_manager.wallet_exists():
-        typer.echo("\n🔐 No SolCoder wallet found. Let's create or restore one before continuing.")
+        styled_echo("\n🔐 No SolCoder wallet found. Let's create or restore one before continuing.")
         if master_passphrase:
-            typer.echo("We'll reuse the passphrase you just set for SolCoder to keep everything in sync.")
+            styled_echo("We'll reuse the passphrase you just set for SolCoder to keep everything in sync.")
         else:
-            typer.echo("You'll secure the wallet with your SolCoder passphrase.")
+            styled_echo("You'll secure the wallet with your SolCoder passphrase.")
         while True:
             choice = (
                 typer.prompt("Create new wallet or restore existing? [c/r]", default="c")
@@ -331,12 +340,12 @@ def _bootstrap_wallet(
                 .lower()
             )
             if choice in {"c", "create"}:
-                typer.echo("\nWe'll generate a recovery phrase. Store it securely—anyone with the phrase controls your funds.")
+                styled_echo("\nWe'll generate a recovery phrase. Store it securely—anyone with the phrase controls your funds.")
                 status, mnemonic = wallet_manager.create_wallet(_ensure_passphrase(), force=True)
-                typer.echo("✅ Wallet created and unlocked.")
+                styled_echo("✅ Wallet created and unlocked.")
                 _show_balance(rpc_client, status.public_key)
-                typer.echo("\n📝 Recovery phrase (write it down, keep it offline):")
-                typer.echo(mnemonic)
+                styled_echo("\n📝 Recovery phrase (write it down, keep it offline):")
+                styled_echo(mnemonic)
                 break
             if choice in {"r", "restore"}:
                 method = (
@@ -348,7 +357,7 @@ def _bootstrap_wallet(
                     path_input = typer.prompt("Path to wallet backup file")
                     secret_path = Path(path_input).expanduser()
                     if not secret_path.exists():
-                        typer.echo("❌ File not found. Please try again.")
+                        styled_echo("❌ File not found. Please try again.")
                         continue
                     secret = secret_path.read_text().strip()
                 else:
@@ -360,21 +369,21 @@ def _bootstrap_wallet(
                         overwrite=True,
                     )
                 except WalletError as exc:
-                    typer.echo(f"❌ {exc}")
+                    styled_echo(f"❌ {exc}")
                     continue
-                typer.echo("✅ Wallet restored.")
+                styled_echo("✅ Wallet restored.")
                 try:
                     wallet_manager.unlock_wallet(_ensure_passphrase())
-                    typer.echo("🔓 Wallet unlocked.")
+                    styled_echo("🔓 Wallet unlocked.")
                 except WalletError:
-                    typer.echo("⚠️  Unable to unlock wallet with provided passphrase; it will remain locked.")
+                    styled_echo("⚠️  Unable to unlock wallet with provided passphrase; it will remain locked.")
                 _show_balance(rpc_client, status.public_key)
                 if mnemonic:
-                    typer.echo("Recovery phrase stored from your input.")
+                    styled_echo("Recovery phrase stored from your input.")
                 break
 
             else:
-                typer.echo("Please choose 'c' (create) or 'r' (restore).")
+                styled_echo("Please choose 'c' (create) or 'r' (restore).")
         return
 
     status = wallet_manager.status()
@@ -382,8 +391,6 @@ def _bootstrap_wallet(
         if master_passphrase:
             try:
                 wallet_manager.unlock_wallet(master_passphrase)
-                typer.echo("🔓 Wallet unlocked with your SolCoder passphrase.")
-                _show_balance(rpc_client, wallet_manager.status().public_key)
             except WalletError:
                 if typer.confirm("Stored passphrase didn't unlock the wallet. Enter it manually?", default=True):
                     _prompt_unlock(wallet_manager)
@@ -449,7 +456,7 @@ def _run_llm_dry_run(
     api_key: str | None = None,
     offline_mode: bool = False,
 ) -> None:
-    typer.echo("🔍 SolCoder LLM dry run")
+    styled_echo("🔍 SolCoder LLM dry run")
     config_context = config_manager.ensure(
         interactive=True,
         llm_base_url=base_url,
@@ -473,7 +480,7 @@ def _run_llm_dry_run(
 
     def _on_chunk(chunk: str) -> None:
         tokens.append(chunk)
-        typer.echo(chunk, nl=False)
+        styled_echo(chunk, nl=False)
 
     try:
         result = llm_client.stream_chat(
@@ -482,15 +489,15 @@ def _run_llm_dry_run(
             on_chunk=_on_chunk,
         )
     except LLMError as exc:
-        typer.echo(f"❌ LLM error: {exc}")
+        styled_echo(f"❌ LLM error: {exc}")
         raise typer.Exit(code=1) from exc
     finally:
         llm_client.close()
 
     if tokens:
-        typer.echo()
+        styled_echo()
     status = "cached" if result.cached else "live"
-    typer.echo(
+    styled_echo(
         f"✅ LLM dry run completed in {result.latency_seconds:.2f}s using {config_context.config.llm_provider}:{config_context.config.llm_model} ({status}, reasoning={config_context.config.llm_reasoning_effort})"
     )
     raise typer.Exit()
@@ -517,7 +524,7 @@ def _launch_shell(
     if config_file is not None:
         config_override_path = config_file.expanduser()
         if not config_override_path.exists():
-            typer.echo(f"❌ Config file '{config_override_path}' not found.")
+            styled_echo(f"❌ Config file '{config_override_path}' not found.")
             raise typer.Exit(code=1)
         config_override_path = config_override_path.resolve()
 
@@ -567,7 +574,7 @@ def _launch_shell(
             offline_mode=offline_mode,
         )
     except LLMError as exc:
-        typer.echo(f"❌ Unable to initialize LLM client: {exc}")
+        styled_echo(f"❌ Unable to initialize LLM client: {exc}")
         raise typer.Exit(code=1) from exc
 
     session_manager = SessionManager(root=project_home / "sessions")
@@ -579,10 +586,10 @@ def _launch_shell(
         try:
             session_context = session_manager.start(resume_id, active_project=str(project_root))
         except FileNotFoundError:
-            typer.echo(f"⚠️  Session '{resume_id}' not found; starting a new session.")
+            styled_echo(f"⚠️  Session '{resume_id}' not found; starting a new session.")
             session_context = session_manager.start(active_project=str(project_root))
         except SessionLoadError as exc:
-            typer.echo(f"⚠️  {exc}. Starting a new session.")
+            styled_echo(f"⚠️  {exc}. Starting a new session.")
             session_context = session_manager.start(active_project=str(project_root))
     else:
         session_context = session_manager.start(active_project=str(project_root))
@@ -640,7 +647,7 @@ def version() -> None:
         pkg_version = metadata.version("solcoder")
     except metadata.PackageNotFoundError:
         pkg_version = "0.0.0"
-    typer.echo(f"SolCoder CLI version {pkg_version}")
+    styled_echo(f"SolCoder CLI version {pkg_version}")
 
 
 def _extract_dump_args(args: list[str]) -> tuple[str | None, str, Path | None, list[str]]:
@@ -655,7 +662,7 @@ def _extract_dump_args(args: list[str]) -> tuple[str | None, str, Path | None, l
             value: str | None = None
             if arg == "--dump-session":
                 if i + 1 >= len(args):
-                    typer.echo("❌ Option '--dump-session' requires a session id.")
+                    styled_echo("❌ Option '--dump-session' requires a session id.")
                     raise typer.Exit(code=2)
                 value = args[i + 1]
                 i += 2
@@ -663,14 +670,14 @@ def _extract_dump_args(args: list[str]) -> tuple[str | None, str, Path | None, l
                 value = arg.split("=", 1)[1]
                 i += 1
             if not value:
-                typer.echo("❌ Session id for '--dump-session' cannot be empty.")
+                styled_echo("❌ Session id for '--dump-session' cannot be empty.")
                 raise typer.Exit(code=2)
             session_id = value
             continue
         if arg.startswith("--dump-format"):
             if arg == "--dump-format":
                 if i + 1 >= len(args):
-                    typer.echo("❌ Option '--dump-format' requires a value (json or text).")
+                    styled_echo("❌ Option '--dump-format' requires a value (json or text).")
                     raise typer.Exit(code=2)
                 dump_format = args[i + 1]
                 i += 2
@@ -681,7 +688,7 @@ def _extract_dump_args(args: list[str]) -> tuple[str | None, str, Path | None, l
         if arg.startswith("--dump-output"):
             if arg == "--dump-output":
                 if i + 1 >= len(args):
-                    typer.echo("❌ Option '--dump-output' requires a file path.")
+                    styled_echo("❌ Option '--dump-output' requires a file path.")
                     raise typer.Exit(code=2)
                 dump_output = Path(args[i + 1]).expanduser()
                 i += 2
@@ -712,7 +719,7 @@ def main() -> None:
         return
     if remaining and remaining[0] == "--template":
         if len(remaining) < 2:
-            typer.echo("❌ Option '--template' requires a template name.")
+            styled_echo("❌ Option '--template' requires a template name.")
             raise typer.Exit(code=2)
         template_name = remaining[1]
         _render_template_cli(template_name, remaining[2:])
