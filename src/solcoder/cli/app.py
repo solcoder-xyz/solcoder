@@ -16,13 +16,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from solcoder.core.context import (
-    ContextManager,
-    DEFAULT_LLM_INPUT_LIMIT,
-)
+from solcoder.core.context import ContextManager
 from solcoder.cli.wallet_prompts import prompt_secret, prompt_text
 from solcoder.cli.commands import register_builtin_commands
 from solcoder.cli.stub_llm import StubLLM
+from solcoder.cli.status_bar import StatusBar
 from solcoder.cli.types import CommandResponse, CommandRouter, LLMBackend
 from solcoder.core import ConfigContext, ConfigManager
 from solcoder.core.agent_loop import (
@@ -32,6 +30,7 @@ from solcoder.core.agent_loop import (
 )
 from solcoder.core.todo import TodoManager
 from solcoder.core.llm import LLMError
+from solcoder.core.logs import LogBuffer, LogEntry
 from solcoder.core.tool_registry import (
     ToolRegistry,
     ToolkitAlreadyRegisteredError,
@@ -75,16 +74,27 @@ class CLIApp:
             self.session_manager.root / self.session_context.metadata.session_id / "history"
         )
         history_path.parent.mkdir(parents=True, exist_ok=True)
-        self.session = PromptSession(history=FileHistory(str(history_path)))
         self.command_router = CommandRouter()
         self.todo_manager = TodoManager()
-        register_builtin_commands(self, self.command_router)
         self._llm: LLMBackend = llm or StubLLM()
         self.context_manager = ContextManager(
             self.session_context,
             llm=self._llm,
             config_context=self.config_context,
         )
+        self.log_buffer = LogBuffer()
+        self.status_bar = StatusBar(
+            console=self.console,
+            context_manager=self.context_manager,
+            log_buffer=self.log_buffer,
+        )
+        bottom_toolbar = self.status_bar.toolbar if self.status_bar.supports_toolbar else None
+        self.session = PromptSession(
+            history=FileHistory(str(history_path)),
+            bottom_toolbar=bottom_toolbar,
+        )
+        self.log_buffer.subscribe(lambda _entry: self._refresh_status_bar())
+        register_builtin_commands(self, self.command_router)
         self._load_todo_state()
         self.tool_registry = tool_registry or build_default_registry()
         try:
@@ -94,6 +104,19 @@ class CLIApp:
         initial_status = self.wallet_manager.status()
         initial_balance = fetch_balance(self.rpc_client, initial_status.public_key)
         update_wallet_metadata(self.session_context.metadata, initial_status, balance=initial_balance)
+        network_name = (
+            self.config_context.config.network
+            if self.config_context is not None and hasattr(self.config_context, "config")
+            else "unknown"
+        )
+        self.log_event(
+            "system",
+            f"Session {self.session_context.metadata.session_id} initialised (network={network_name})",
+        )
+        if initial_status.exists:
+            self.log_event("wallet", f"Wallet detected {initial_status.masked_address}")
+        else:
+            self.log_event("wallet", "No wallet configured", severity="warning")
         logger.debug(
             "CLIApp initialized with history file %s for session %s",
             history_path,
@@ -158,7 +181,12 @@ class CLIApp:
             self.context_manager.record(role, message, tool_calls=tool_calls)
         self.context_manager.compact_history_if_needed()
         self._persist()
+        self._refresh_status_bar()
         return response
+
+    def log_event(self, category: str, message: str, *, severity: str = "info") -> LogEntry:
+        """Record an operational event in the shared log buffer."""
+        return self.log_buffer.record(category, message, severity=severity)
 
     def _max_agent_iterations(self) -> int:
         return DEFAULT_AGENT_MAX_ITERATIONS
@@ -230,28 +258,20 @@ class CLIApp:
         self.console.print(Panel(text, title=panel_title, expand=False))
 
     def _render_status(self) -> None:
-        session_id = self.session_context.metadata.session_id
-        metadata = self.session_context.metadata
-        project_display = metadata.active_project or "unknown"
-        wallet_display = metadata.wallet_status or "---"
-        balance_display = (
-            f"{metadata.wallet_balance:.3f} SOL" if metadata.wallet_balance is not None else "--"
-        )
-        spend_display = f"{metadata.spend_amount:.2f} SOL"
-        input_limit = self.context_manager.config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
-        recent_input = metadata.llm_last_input_tokens or 0
-        percent_input = min((recent_input / input_limit * 100) if input_limit else 0.0, 100.0)
-        output_total = metadata.llm_output_tokens or 0
-        tokens_display = (
-            f"ctx in last {recent_input:,}/{input_limit:,} ({percent_input:.1f}%) • "
-            f"out total {output_total:,}"
-        )
-        status = Text(
-            f"Session: {session_id} • Project: {project_display} • Wallet: {wallet_display} • "
-            f"Balance: {balance_display} • Spend: {spend_display} • Tokens: {tokens_display}",
-            style="dim",
-        )
-        self.console.print(status)
+        if self.status_bar.supports_toolbar:
+            self._refresh_status_bar()
+            return
+        self.console.print(self.status_bar.render_text())
+
+    def _refresh_status_bar(self) -> None:
+        if not self.status_bar.supports_toolbar:
+            return
+        try:
+            application = self.session.app
+        except Exception:  # pragma: no cover - defensive guard for teardown races
+            return
+        if getattr(application, "is_running", False):
+            application.invalidate()
 
     def _prompt_message(self) -> str:
         return "❯ "
@@ -283,6 +303,7 @@ class CLIApp:
 
     def _update_wallet_metadata(self, status: WalletStatus, *, balance: float | None) -> None:
         update_wallet_metadata(self.session_context.metadata, status, balance=balance)
+        self._refresh_status_bar()
 
     def _fetch_balance(self, public_key: str | None) -> float | None:
         return fetch_balance(self.rpc_client, public_key)

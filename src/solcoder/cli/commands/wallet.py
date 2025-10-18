@@ -18,6 +18,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
     def handle(app: CLIApp, args: list[str]) -> CommandResponse:
         manager = app.wallet_manager
         if manager is None:
+            app.log_event("wallet", "Wallet manager unavailable", severity="error")
             return CommandResponse(messages=[("system", "Wallet manager unavailable in this session.")])
 
         if not args or args[0].lower() == "status":
@@ -25,6 +26,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             balance = app._fetch_balance(status.public_key)
             app._update_wallet_metadata(status, balance=balance)
             if not status.exists:
+                app.log_event("wallet", "Wallet status requested (missing)", severity="warning")
                 return CommandResponse(messages=[("system", "No wallet found. Run `/wallet create` to set one up.")])
             lock_state = "Unlocked" if status.is_unlocked else "Locked"
             balance_line = f"Balance: {balance:.3f} SOL" if balance is not None else "Balance: unavailable"
@@ -35,6 +37,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     balance_line,
                 ]
             )
+            app.log_event("wallet", f"Status checked: {lock_state} ({status.masked_address})")
             return CommandResponse(messages=[("system", message)])
 
         command, *rest = args
@@ -42,6 +45,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
 
         if command == "create":
             if manager.wallet_exists():
+                app.log_event("wallet", "Wallet create aborted: already exists", severity="warning")
                 return CommandResponse(
                     messages=[("system", "Wallet already exists. Delete the file manually or use `/wallet restore` with overwrite.")],
                 )
@@ -57,6 +61,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     mnemonic,
                 ]
             )
+            app.log_event("wallet", f"Wallet created {status.masked_address}")
             return CommandResponse(messages=[("system", message)])
 
         if command == "restore":
@@ -69,6 +74,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             try:
                 status, mnemonic = manager.restore_wallet(secret, passphrase, overwrite=True)
             except WalletError as exc:
+                app.log_event("wallet", f"Wallet restore failed: {exc}", severity="error")
                 app.console.print(f"[red]{exc}")
                 return CommandResponse(messages=[("system", str(exc))])
             try:
@@ -84,6 +90,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 restored_lines.append("Use `/wallet unlock` to access.")
             if mnemonic:
                 restored_lines.append("Recovery phrase saved from the provided words.")
+            app.log_event("wallet", f"Wallet restored {status.masked_address}")
             return CommandResponse(messages=[("system", " ".join(restored_lines))])
 
         if command == "unlock":
@@ -91,20 +98,24 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             try:
                 status = manager.unlock_wallet(initial_pass)
             except WalletError:
+                app.log_event("wallet", "Stored passphrase unlock failed", severity="warning")
                 app.console.print("[yellow]Stored passphrase failed; please re-enter.[/yellow]")
                 retry_pass = app._prompt_secret("Wallet passphrase", allow_master=False)
                 try:
                     status = manager.unlock_wallet(retry_pass)
                 except WalletError as exc:
+                    app.log_event("wallet", f"Wallet unlock failed: {exc}", severity="error")
                     return CommandResponse(messages=[("system", str(exc))])
             balance = app._fetch_balance(status.public_key)
             app._update_wallet_metadata(status, balance=balance)
             balance_line = f" Current balance {balance:.3f} SOL." if balance is not None else "."
+            app.log_event("wallet", f"Wallet unlocked {status.masked_address}")
             return CommandResponse(messages=[("system", f"Wallet unlocked for {status.public_key}.{balance_line}")])
 
         if command == "lock":
             status = manager.lock_wallet()
             app._update_wallet_metadata(status, balance=None)
+            app.log_event("wallet", "Wallet locked")
             return CommandResponse(messages=[("system", "Wallet locked.")])
 
         if command == "export":
@@ -112,11 +123,14 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             try:
                 secret = manager.export_wallet(passphrase)
             except WalletError as exc:
+                app.log_event("wallet", f"Wallet export failed: {exc}", severity="error")
                 return CommandResponse(messages=[("system", str(exc))])
             if rest:
                 target_path = Path(rest[0]).expanduser()
                 app._write_secret_file(target_path, secret)
+                app.log_event("wallet", f"Wallet exported to {target_path}")
                 return CommandResponse(messages=[("system", f"Exported secret to {target_path}")])
+            app.log_event("wallet", "Wallet secret exported inline", severity="warning")
             return CommandResponse(messages=[("system", f"Exported secret: {secret}")])
 
         if command in {"phrase", "mnemonic"}:
@@ -124,9 +138,12 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             try:
                 mnemonic = manager.get_mnemonic(passphrase)
             except WalletError as exc:
+                app.log_event("wallet", f"Wallet mnemonic request failed: {exc}", severity="error")
                 return CommandResponse(messages=[("system", str(exc))])
+            app.log_event("wallet", "Wallet mnemonic retrieved", severity="warning")
             return CommandResponse(messages=[("system", f"Recovery phrase:\n{mnemonic}")])
 
+        app.log_event("wallet", f"Unknown wallet command '{command}'", severity="warning")
         return CommandResponse(
             messages=[
                 (

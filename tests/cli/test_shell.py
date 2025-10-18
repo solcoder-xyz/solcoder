@@ -165,6 +165,71 @@ def test_help_command_bypasses_llm(
     assert any("/help" in message for _, message in response.messages)
 
 
+def test_status_bar_snapshot_reflects_metadata(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+    )
+
+    metadata = app.session_context.metadata
+    metadata.active_project = "/project/root"
+    metadata.wallet_status = "Unlocked (ABCD…1234)"
+    metadata.wallet_balance = 1.234
+    metadata.spend_amount = 0.75
+    metadata.llm_last_input_tokens = 1_000
+    metadata.llm_output_tokens = 2_000
+    config_context.config.network = "testnet"
+    app.log_event("wallet", "Test wallet log")
+
+    snapshot = app.status_bar.snapshot()
+
+    assert snapshot.project == "/project/root"
+    assert snapshot.network == "testnet"
+    assert snapshot.wallet == "Unlocked (ABCD…1234)"
+    assert snapshot.balance == "1.234 SOL"
+    assert snapshot.spend == "0.75 SOL"
+    assert snapshot.tokens.startswith("in 1,000/272,000")
+    assert snapshot.last_log == "wallet/INFO"
+
+
+def test_logs_command_filters_and_redacts(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+    )
+
+    app.log_event("wallet", "Wallet key VkgXGe7czUXXcWzeWgt6H9VxLJhqioU5AnqRC1Ry2GK")
+    app.log_event("deploy", "Deploy finished successfully")
+
+    response = app.handle_line("/logs wallet")
+
+    message = "\n".join(text for _, text in response.messages)
+    assert "wallet" in message
+    assert "deploy" not in message
+    assert "VkgX…y2GK" in message
+
+    invalid = app.handle_line("/logs unknown")
+    assert any("Unknown log category" in text for _, text in invalid.messages)
+
+
 def test_chat_message_invokes_llm(
     console: Console,
     session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],

@@ -30,6 +30,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
 
         template_name = args[0].lower()
         if template_name not in available_templates():
+            app.log_event("build", f"Unknown template '{template_name}'", severity="warning")
             return CommandResponse(
                 messages=[(
                     "system",
@@ -40,15 +41,19 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         defaults = app._default_template_metadata()
         options, error = parse_template_tokens(template_name, args[1:], defaults)
         if error:
+            app.log_event("build", f"Template option parsing failed: {error}", severity="error")
             return CommandResponse(messages=[("system", error)])
         if options is None:
+            app.log_event("build", "Template option parsing returned no result", severity="error")
             return CommandResponse(messages=[("system", "Unable to parse template options.")])
         try:
             output = render_template(options)
         except TemplateError as exc:
+            app.log_event("build", f"Template render failed: {exc}", severity="error")
             return CommandResponse(messages=[("system", f"Template error: {exc}")])
 
         message = f"Template '{template_name}' rendered to {output}"
+        app.log_event("build", f"Template '{template_name}' rendered to {output}")
         tool_calls = [
             {
                 "type": "command",
