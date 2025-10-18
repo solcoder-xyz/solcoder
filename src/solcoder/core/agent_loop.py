@@ -71,6 +71,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     last_finish_reason: str | None = None
     all_cached = True
     retry_payload: str | None = None
+    should_exit = False
 
     provider_name, model_name, reasoning_effort = _active_model_details(
         ctx.config_context
@@ -344,6 +345,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     ctx.render_message("agent", preview)
                     rendered_roles.add("agent")
                     _maybe_render_todo(payload_data)
+
+                    if isinstance(payload_data, dict) and payload_data.get("exit_app"):
+                        should_exit = True
+                        status_message = Text("Closing session…", style="solcoder.status.text")
+                        status_indicator.update(status_message)
                     _append_todo_instruction(step_title)
 
                     summary_entry: dict[str, Any] = {
@@ -436,6 +442,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     tool_calls = [llm_summary, *tool_summaries]
     return CommandResponse(
         messages=display_messages,
+        continue_loop=not should_exit,
         tool_calls=tool_calls,
         rendered_roles=rendered_roles or None,
     )
@@ -492,7 +499,9 @@ def _agent_system_prompt(
         "8. Reach for the TODO tools (todo_add_task, todo_update_task, etc.) when you need to track "
         "multi-step work. Skip them entirely for quick answers. Reserve generate_plan for long-term "
         "strategy. When you want the CLI to show the checklist, set show_todo_list=true; otherwise "
-        "leave it out to keep the list hidden.\n\n"
+        "leave it out to keep the list hidden.\n"
+        "9. If the user indicates they want to end the conversation or close SolCoder, invoke the "
+        "quit tool to terminate the session gracefully, then acknowledge the shutdown with a final reply.\n\n"
         f"Current configuration: provider={provider_name}, model={model_name}, "
         f"reasoning_effort={reasoning_effort}.\n"
         f"Available tools: {manifest_json}\n"

@@ -7,6 +7,7 @@ from .diagnostics import diagnostics_toolkit
 from .knowledge import knowledge_toolkit
 from .plan import plan_toolkit
 from .review import review_toolkit
+from .session import session_toolkit
 
 DEFAULT_TOOLKIT_FACTORIES = [
     plan_toolkit,
@@ -15,6 +16,7 @@ DEFAULT_TOOLKIT_FACTORIES = [
     deploy_toolkit,
     diagnostics_toolkit,
     knowledge_toolkit,
+    session_toolkit,
     command_toolkit,
 ]
 
