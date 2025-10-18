@@ -553,8 +553,7 @@ def test_todo_command_add_and_complete(
     assert "[x]" in complete_response.messages[0][1]
 
     plan_response = app.handle_line("hello solcoder")
-    titles = [task.title for task in app.todo_manager.tasks()]
-    assert any(title == "Write docs" for title in titles)
+    assert not app.todo_manager.tasks()
     assert any("TODO List" in message for _, message in plan_response.messages)
 
 

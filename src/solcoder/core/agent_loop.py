@@ -118,9 +118,17 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
         rendered_roles.add("agent")
 
     def _bootstrap_plan_into_todo(steps: list[str] | None) -> bool:
-        if ctx.todo_manager is None or not steps:
+        if ctx.todo_manager is None:
             return False
         existing_tasks = ctx.todo_manager.tasks()
+        if existing_tasks:
+            todo_render = ctx.todo_manager.render()
+            display_messages.append(("agent", todo_render))
+            ctx.render_message("agent", todo_render)
+            rendered_roles.add("agent")
+            return True
+        if not steps:
+            return False
         existing_titles = {task.title.strip().lower() for task in existing_tasks}
         added = False
         for step in steps:
