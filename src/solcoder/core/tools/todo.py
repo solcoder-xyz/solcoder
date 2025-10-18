@@ -140,7 +140,7 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         expected_rev = payload.get("if_match", manager.revision)
         manager.clear(expected_revision=expected_rev)
         return _result(
-            "All tasks cleared.",
+            "",
             summary="TODO list cleared",
             show=show,
         )

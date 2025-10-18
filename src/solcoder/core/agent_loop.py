@@ -181,14 +181,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
             rendered_roles.add("system")
             ctx.todo_manager.acknowledge()
         else:
-            summary = (
-                "All TODO items are complete. 🎉\n"
-                f"{ctx.todo_manager.render()}\n"
-                "Tip: Run `/todo clear` to archive or reset when you're ready."
-            )
-            display_messages.append(("system", summary))
-            ctx.render_message("system", summary)
-            rendered_roles.add("system")
+            ctx.todo_manager.acknowledge()
 
     with ctx.console.status(status_message, spinner="dots") as status_indicator:
         try:
