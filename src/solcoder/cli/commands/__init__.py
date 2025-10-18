@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from solcoder.cli.commands import env, session, settings, template, toolkits, wallet
+from solcoder.cli.commands import env, session, settings, template, todo, toolkits, wallet
 from solcoder.cli.commands import help as help_cmd
 from solcoder.cli.commands import quit as quit_cmd
 from solcoder.cli.types import CommandRouter
@@ -23,6 +23,7 @@ def register_builtin_commands(app: CLIApp, router: CommandRouter) -> None:
     session.register(app, router)
     env.register(app, router)
     template.register(app, router)
+    todo.register(app, router)
     wallet.register(app, router)
 
 

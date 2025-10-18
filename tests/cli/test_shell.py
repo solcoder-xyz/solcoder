@@ -494,6 +494,28 @@ def test_settings_persist_to_config(
     assert reloaded.config.llm_reasoning_effort == "high"
 
 
+def test_todo_command_add_and_complete(
+    console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    response = app.handle_line("/todo add Write docs --desc outline")
+    assert any("TODO List" in message for _, message in response.messages)
+    assert len(app.todo_manager.tasks()) == 1
+    task_id = app.todo_manager.tasks()[0].id
+
+    complete_response = app.handle_line(f"/todo done {task_id}")
+    assert any("marked complete" in message for _, message in complete_response.messages)
+    assert "[x]" in complete_response.messages[0][1]
+
+
 def test_settings_summary(
     console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
 ) -> None:

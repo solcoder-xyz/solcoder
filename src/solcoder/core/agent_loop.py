@@ -17,6 +17,7 @@ from solcoder.core import (
     manifest_to_prompt_section,
     parse_agent_directive,
 )
+from solcoder.core.todo import TodoManager
 from solcoder.core.tool_registry import ToolRegistry, ToolRegistryError
 from solcoder.session import SessionMetadata
 
@@ -39,6 +40,7 @@ class AgentLoopContext:
     config_context: ConfigContext | None
     session_metadata: SessionMetadata
     render_message: Callable[[str, str], None]
+    todo_manager: TodoManager | None = None
     max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS
 
 
@@ -99,6 +101,18 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
     iteration = 0
     cancelled = False
     status_message = "[cyan]Thinking…[/cyan]"
+
+    def _maybe_render_todo(payload: Any) -> None:
+        if not isinstance(payload, dict):
+            return
+        if not payload.get("show_todo_list"):
+            return
+        todo_render = payload.get("todo_render")
+        if not isinstance(todo_render, str) or not todo_render.strip():
+            return
+        display_messages.append(("agent", todo_render))
+        ctx.render_message("agent", todo_render)
+        rendered_roles.add("agent")
 
     with ctx.console.status(status_message, spinner="dots") as status_indicator:
         try:
@@ -210,6 +224,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                     display_messages.append(("agent", preview))
                     ctx.render_message("agent", preview)
                     rendered_roles.add("agent")
+                    _maybe_render_todo(payload_data)
 
                     summary_entry: dict[str, Any] = {
                         "type": "tool",
@@ -242,6 +257,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                     display_messages.append(("agent", final_message))
                     ctx.render_message("agent", final_message)
                     rendered_roles.add("agent")
+                    if ctx.todo_manager is not None:
+                        ctx.todo_manager.clear()
                     status_message = "[cyan]Thinking…[/cyan]"
                     break
 
@@ -250,6 +267,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
                     display_messages.append(("system", cancel_message))
                     ctx.render_message("system", cancel_message)
                     rendered_roles.add("system")
+                    if ctx.todo_manager is not None:
+                        ctx.todo_manager.clear()
                     status_message = "[cyan]Thinking…[/cyan]"
                     break
         except KeyboardInterrupt:
@@ -342,7 +361,10 @@ def _agent_system_prompt(config_context: ConfigContext | None, manifest_json: st
         '{"type":"plan_ack","status":"ready"}; treat it as confirmation to continue.\n'
         "6. After the orchestrator sends you tool results, continue the loop using the "
         "latest context until you can emit a final reply.\n"
-        "7. Do not invent tools. Only use the manifest provided below.\n\n"
+        "7. Do not invent tools. Only use the manifest provided below.\n"
+        "8. Use the TODO tools (todo_add_task, todo_update_task, etc.) to track active execution steps. "
+        "Reserve generate_plan for long-term strategy. When you want the CLI to show the checklist, "
+        "set show_todo_list=true in the tool arguments; omit it or set false to keep the list hidden.\n\n"
         f"Current configuration: provider={provider_name}, model={model_name}, "
         f"reasoning_effort={reasoning_effort}.\n"
         f"Available tools: {manifest_json}\n"

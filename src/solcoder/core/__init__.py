@@ -36,6 +36,7 @@ from .context import (
     DEFAULT_LLM_INPUT_LIMIT,
     DEFAULT_COMPACTION_COOLDOWN,
 )
+from .todo import TodoItem, TodoManager
 from .wallet_state import fetch_balance, update_wallet_metadata
 
 __all__ = [
@@ -68,6 +69,8 @@ __all__ = [
     "DEFAULT_AUTO_COMPACT_THRESHOLD",
     "DEFAULT_LLM_INPUT_LIMIT",
     "DEFAULT_COMPACTION_COOLDOWN",
+    "TodoManager",
+    "TodoItem",
     "update_wallet_metadata",
     "fetch_balance",
     "ToolRegistry",

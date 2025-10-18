@@ -30,9 +30,15 @@ from solcoder.core.agent_loop import (
     AgentLoopContext,
     run_agent_loop,
 )
-from solcoder.core.wallet_state import fetch_balance, update_wallet_metadata
+from solcoder.core.todo import TodoManager
 from solcoder.core.llm import LLMError
-from solcoder.core.tool_registry import ToolRegistry, build_default_registry
+from solcoder.core.tool_registry import (
+    ToolRegistry,
+    ToolkitAlreadyRegisteredError,
+    build_default_registry,
+)
+from solcoder.core.tools.todo import todo_toolkit
+from solcoder.core.wallet_state import fetch_balance, update_wallet_metadata
 from solcoder.session import SessionContext, SessionManager
 from solcoder.solana import SolanaRPCClient, WalletError, WalletManager, WalletStatus
 
@@ -71,6 +77,7 @@ class CLIApp:
         history_path.parent.mkdir(parents=True, exist_ok=True)
         self.session = PromptSession(history=FileHistory(str(history_path)))
         self.command_router = CommandRouter()
+        self.todo_manager = TodoManager()
         register_builtin_commands(self, self.command_router)
         self._llm: LLMBackend = llm or StubLLM()
         self.context_manager = ContextManager(
@@ -79,6 +86,10 @@ class CLIApp:
             config_context=self.config_context,
         )
         self.tool_registry = tool_registry or build_default_registry()
+        try:
+            self.tool_registry.add_toolkit(todo_toolkit(self.todo_manager))
+        except ToolkitAlreadyRegisteredError:
+            logger.debug("Todo toolkit already registered; skipping duplicate add.")
         initial_status = self.wallet_manager.status()
         initial_balance = fetch_balance(self.rpc_client, initial_status.public_key)
         update_wallet_metadata(self.session_context.metadata, initial_status, balance=initial_balance)
@@ -165,6 +176,7 @@ class CLIApp:
             config_context=self.config_context,
             session_metadata=self.session_context.metadata,
             render_message=self._render_message,
+            todo_manager=self.todo_manager,
             max_iterations=self._max_agent_iterations(),
         )
         try:
