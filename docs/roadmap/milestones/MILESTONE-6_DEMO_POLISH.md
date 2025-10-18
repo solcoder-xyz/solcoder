@@ -15,7 +15,7 @@ Stabilize the deploy loop, raise quality bars, and prepare presentation assets s
 - Demo collateral: scripted flow, backup project with prebuilt artifacts, failure playbook, and screenshots/terminal captures.
 
 ## Success Criteria
-- `poetry run pytest` (including `tests/e2e`) passes with ≥80% coverage on `src/solcoder/core` and `src/solcoder/solana`.
+- `poetry run pytest` (including `tests/e2e`) passes with ≥80% coverage on `src/solcoder/core` (including the modular `core/llm/` package) and `src/solcoder/solana`.
 - Running `pipx install solcoder` followed by `solcoder` reproduces the golden-path demo.
 - `/logs` displays the latest build/deploy/wallet events with redacted secrets.
 - Demo script rehearsed: team can complete onboarding, deploy, and review within seven minutes.

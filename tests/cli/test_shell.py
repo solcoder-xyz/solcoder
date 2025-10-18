@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from rich.console import Console
 
-from solcoder.cli.agent_loop import AGENT_PLAN_ACK
+from solcoder.core.agent_loop import AGENT_PLAN_ACK
 from solcoder.cli.app import CLIApp
 from solcoder.cli.stub_llm import StubLLM
 from solcoder.cli.commands import env as env_commands
@@ -452,8 +452,8 @@ def test_session_compact_command(
     )
 
     for i in range(6):
-        app._record("user", f"user-msg-{i}")
-        app._record("agent", f"agent-msg-{i}")
+        app.context_manager.record("user", f"user-msg-{i}")
+        app.context_manager.record("agent", f"agent-msg-{i}")
 
     response = app.handle_line("/session compact")
 

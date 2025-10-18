@@ -25,6 +25,18 @@ from .tool_registry import (
     ToolkitAlreadyRegisteredError,
     build_default_registry,
 )
+from .context import (
+    ContextManager,
+    HistoryCompactionStrategy,
+    RollingHistoryStrategy,
+    DEFAULT_HISTORY_LIMIT,
+    DEFAULT_SUMMARY_KEEP,
+    DEFAULT_SUMMARY_MAX_WORDS,
+    DEFAULT_AUTO_COMPACT_THRESHOLD,
+    DEFAULT_LLM_INPUT_LIMIT,
+    DEFAULT_COMPACTION_COOLDOWN,
+)
+from .wallet_state import fetch_balance, update_wallet_metadata
 
 __all__ = [
     "AgentDirective",
@@ -47,6 +59,17 @@ __all__ = [
     "TemplateError",
     "TemplateExistsError",
     "TemplateNotFoundError",
+    "ContextManager",
+    "HistoryCompactionStrategy",
+    "RollingHistoryStrategy",
+    "DEFAULT_HISTORY_LIMIT",
+    "DEFAULT_SUMMARY_KEEP",
+    "DEFAULT_SUMMARY_MAX_WORDS",
+    "DEFAULT_AUTO_COMPACT_THRESHOLD",
+    "DEFAULT_LLM_INPUT_LIMIT",
+    "DEFAULT_COMPACTION_COOLDOWN",
+    "update_wallet_metadata",
+    "fetch_balance",
     "ToolRegistry",
     "ToolRegistryError",
     "ToolResult",

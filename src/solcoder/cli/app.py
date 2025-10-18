@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,35 +16,31 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from solcoder.cli.agent_loop import (
-    DEFAULT_AGENT_MAX_ITERATIONS,
-    AgentLoopContext,
-    run_agent_loop,
+from solcoder.core.context import (
+    ContextManager,
+    DEFAULT_LLM_INPUT_LIMIT,
 )
+from solcoder.cli.wallet_prompts import prompt_secret, prompt_text
 from solcoder.cli.commands import register_builtin_commands
 from solcoder.cli.stub_llm import StubLLM
 from solcoder.cli.types import CommandResponse, CommandRouter, LLMBackend
 from solcoder.core import ConfigContext, ConfigManager
+from solcoder.core.agent_loop import (
+    DEFAULT_AGENT_MAX_ITERATIONS,
+    AgentLoopContext,
+    run_agent_loop,
+)
+from solcoder.core.wallet_state import fetch_balance, update_wallet_metadata
 from solcoder.core.llm import LLMError
 from solcoder.core.tool_registry import ToolRegistry, build_default_registry
-from solcoder.session import (
-    TRANSCRIPT_LIMIT,
-    SessionContext,
-    SessionManager,
-)
+from solcoder.session import SessionContext, SessionManager
 from solcoder.solana import SolanaRPCClient, WalletError, WalletManager, WalletStatus
 
 logger = logging.getLogger(__name__)
 
 
 DEFAULT_HISTORY_PATH = Path(os.environ.get("SOLCODER_HOME", Path.home() / ".solcoder")) / "history"
-DEFAULT_HISTORY_LIMIT = 20
-DEFAULT_SUMMARY_KEEP = 10
-DEFAULT_SUMMARY_MAX_WORDS = 200
-DEFAULT_AUTO_COMPACT_THRESHOLD = 0.95
-DEFAULT_LLM_INPUT_LIMIT = 272_000
-DEFAULT_LLM_OUTPUT_LIMIT = 128_000
-DEFAULT_COMPACTION_COOLDOWN = 10
+
 class CLIApp:
     """Interactive shell orchestrating slash commands and chat flow."""
 
@@ -78,11 +73,15 @@ class CLIApp:
         self.command_router = CommandRouter()
         register_builtin_commands(self, self.command_router)
         self._llm: LLMBackend = llm or StubLLM()
+        self.context_manager = ContextManager(
+            self.session_context,
+            llm=self._llm,
+            config_context=self.config_context,
+        )
         self.tool_registry = tool_registry or build_default_registry()
-        self._transcript = self.session_context.transcript
         initial_status = self.wallet_manager.status()
-        initial_balance = self._fetch_balance(initial_status.public_key)
-        self._update_wallet_metadata(initial_status, balance=initial_balance)
+        initial_balance = fetch_balance(self.rpc_client, initial_status.public_key)
+        update_wallet_metadata(self.session_context.metadata, initial_status, balance=initial_balance)
         logger.debug(
             "CLIApp initialized with history file %s for session %s",
             history_path,
@@ -132,7 +131,7 @@ class CLIApp:
         if not raw_line:
             return CommandResponse(messages=[])
 
-        self._record("user", raw_line)
+        self.context_manager.record("user", raw_line)
         self._render_message("user", raw_line)
 
         if raw_line.startswith("/"):
@@ -144,18 +143,22 @@ class CLIApp:
 
         for idx, (role, message) in enumerate(response.messages):
             tool_calls = response.tool_calls if idx == 0 else None
-            self._record(role, message, tool_calls=tool_calls)
-        self._compress_history_if_needed()
+            self.context_manager.record(role, message, tool_calls=tool_calls)
+        self.context_manager.compact_history_if_needed()
         self._persist()
         return response
 
     def _max_agent_iterations(self) -> int:
         return DEFAULT_AGENT_MAX_ITERATIONS
 
+    def force_compact_history(self) -> str:
+        """Force transcript compaction using the active history strategy."""
+        return self.context_manager.force_compact_history()
+
     def _chat_with_llm(self, prompt: str) -> CommandResponse:
         context = AgentLoopContext(
             prompt=prompt,
-            history=self._conversation_history(),
+            history=self.context_manager.conversation_history(),
             llm=self._llm,
             tool_registry=self.tool_registry,
             console=self.console,
@@ -169,26 +172,6 @@ class CLIApp:
         except LLMError as exc:
             logger.error("LLM error: %s", exc)
             return CommandResponse(messages=[("system", f"LLM error: {exc}")])
-
-    def _conversation_history(self) -> list[dict[str, str]]:
-        history: list[dict[str, str]] = []
-        # Exclude the most recent entry (current user prompt) because it is passed separately.
-        transcript = self._transcript[:-1]
-        for entry in transcript:
-            message = entry.get("message")
-            if not isinstance(message, str) or not message:
-                continue
-            if entry.get("summary"):
-                history.append({"role": "system", "content": message})
-                continue
-            role = entry.get("role")
-            if role == "user":
-                history.append({"role": "user", "content": message})
-            elif role == "agent":
-                history.append({"role": "assistant", "content": message})
-            else:
-                history.append({"role": "system", "content": message})
-        return history
 
     def _update_llm_settings(self, *, model: str | None = None, reasoning: str | None = None) -> None:
         if self.config_context is None:
@@ -216,133 +199,6 @@ class CLIApp:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to persist LLM settings: %s", exc)
 
-    def _compress_history_if_needed(self) -> None:
-        transcript = self.session_context.transcript
-        history_limit = self._config_int("history_max_messages", DEFAULT_HISTORY_LIMIT)
-        cooldown = self.session_context.metadata.compression_cooldown
-        if len(transcript) > history_limit and cooldown <= 0:
-            self._summarize_older_history()
-        metadata = self.session_context.metadata
-        input_limit = self._config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
-        threshold = self._config_float("history_auto_compact_threshold", DEFAULT_AUTO_COMPACT_THRESHOLD)
-        if metadata.llm_last_input_tokens >= int(input_limit * threshold) and cooldown <= 0:
-            self._compress_full_history()
-        metadata.compression_cooldown = max(metadata.compression_cooldown - 1, 0)
-
-    def _summarize_older_history(self) -> None:
-        transcript = self.session_context.transcript
-        history_limit = self._config_int("history_max_messages", DEFAULT_HISTORY_LIMIT)
-        keep_count = self._config_int("history_summary_keep", DEFAULT_SUMMARY_KEEP)
-        if keep_count >= history_limit:
-            keep_count = max(history_limit - 2, 1)
-        if len(transcript) <= keep_count:
-            return
-        older = transcript[:-keep_count]
-        if not older:
-            return
-        summary_text = self._generate_summary(older)
-        summary_entry = {
-            "role": "system",
-            "message": summary_text,
-            "timestamp": datetime.now(UTC).isoformat(),
-            "summary": True,
-        }
-        self.session_context.transcript = [summary_entry, *transcript[-keep_count:]]
-        self._transcript = self.session_context.transcript
-        input_limit = self._config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
-        self.session_context.metadata.llm_last_input_tokens = min(
-            self._estimate_context_tokens(),
-            input_limit,
-        )
-        self.session_context.metadata.compression_cooldown = self._config_int(
-            "history_compaction_cooldown",
-            DEFAULT_COMPACTION_COOLDOWN,
-        )
-
-    def _compress_full_history(self) -> None:
-        transcript = self.session_context.transcript
-        keep_count = self._config_int("history_summary_keep", DEFAULT_SUMMARY_KEEP)
-        keep_count = max(min(keep_count, len(transcript)), 1)
-        if len(transcript) <= keep_count:
-            return
-        keep = transcript[-keep_count:]
-        summary_text = self._generate_summary(transcript[:-keep_count])
-        summary_entry = {
-            "role": "system",
-            "message": summary_text,
-            "timestamp": datetime.now(UTC).isoformat(),
-            "summary": True,
-        }
-        self.session_context.transcript = [summary_entry, *keep]
-        self._transcript = self.session_context.transcript
-        estimated = self._estimate_context_tokens()
-        metadata = self.session_context.metadata
-        input_limit = self._config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
-        metadata.llm_last_input_tokens = min(estimated, input_limit)
-        metadata.compression_cooldown = self._config_int(
-            "history_compaction_cooldown",
-            DEFAULT_COMPACTION_COOLDOWN,
-        )
-
-    def _generate_summary(self, entries: list[dict[str, Any]]) -> str:
-        if not entries:
-            return "(history empty)"
-        conversation_lines: list[str] = []
-        for entry in entries:
-            role = entry.get("role", "unknown")
-            message = entry.get("message", "")
-            conversation_lines.append(f"{role}: {message}")
-        transcript_text = "\n".join(conversation_lines)
-        base_words = self._config_int("history_summary_max_words", DEFAULT_SUMMARY_MAX_WORDS)
-        keep_count = self._config_int("history_summary_keep", DEFAULT_SUMMARY_KEEP)
-        multiplier = max(1, len(entries) // max(1, keep_count))
-        max_words = base_words * multiplier
-        prompt = (
-            f"Summarize the following SolCoder chat history in no more than {max_words} words. "
-            "Highlight user goals, decisions, constraints, and any open questions.\n"
-            f"Conversation:\n{transcript_text}\n"
-            "Return plain text without bullet characters unless required."
-        )
-        tokens: list[str] = []
-        try:
-            result = self._llm.stream_chat(
-                prompt,
-                history=(),
-                system_prompt="You are a concise summarization engine for coding assistant transcripts.",
-                on_chunk=tokens.append,
-            )
-            summary_text = "".join(tokens).strip() or result.text.strip()
-        except LLMError as exc:
-            logger.warning("LLM summarization failed: %s", exc)
-            summary_text = "Summary unavailable. Recent highlights:\n" + "\n".join(conversation_lines[-3:])
-        if not summary_text:
-            summary_text = "Summary not available."
-        return summary_text
-
-    def _estimate_context_tokens(self) -> int:
-        total = 0
-        for entry in self.session_context.transcript:
-            message = entry.get("message")
-            if isinstance(message, str):
-                total += len(message.split())
-        return total
-
-    def _config_int(self, attr: str, default: int) -> int:
-        if self.config_context is None:
-            return default
-        return int(getattr(self.config_context.config, attr, default) or default)
-
-    def _config_float(self, attr: str, default: float) -> float:
-        if self.config_context is None:
-            return default
-        return float(getattr(self.config_context.config, attr, default) or default)
-
-    def _force_compact_history(self) -> str:
-        before = len(self.session_context.transcript)
-        self._compress_full_history()
-        after = len(self.session_context.transcript)
-        return f"Compacted history from {before} entries to {after}."
-
     # ------------------------------------------------------------------
     # Rendering helpers
     # ------------------------------------------------------------------
@@ -368,7 +224,7 @@ class CLIApp:
             f"{metadata.wallet_balance:.3f} SOL" if metadata.wallet_balance is not None else "--"
         )
         spend_display = f"{metadata.spend_amount:.2f} SOL"
-        input_limit = self._config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
+        input_limit = self.context_manager.config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
         recent_input = metadata.llm_last_input_tokens or 0
         percent_input = min((recent_input / input_limit * 100) if input_limit else 0.0, 100.0)
         output_total = metadata.llm_output_tokens or 0
@@ -386,18 +242,6 @@ class CLIApp:
     def _prompt_message(self) -> str:
         return "❯ "
 
-    def _record(self, role: str, message: str, *, tool_calls: list[dict[str, Any]] | None = None) -> None:
-        entry: dict[str, Any] = {
-            "role": role,
-            "message": message,
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-        if tool_calls:
-            entry["tool_calls"] = tool_calls
-        self.session_context.transcript.append(entry)
-        if len(self.session_context.transcript) > TRANSCRIPT_LIMIT:
-            del self.session_context.transcript[:-TRANSCRIPT_LIMIT]
-
     def _default_template_metadata(self) -> dict[str, str]:
         program_name = "counter"
         author_pubkey = "CHANGEME"
@@ -411,85 +255,23 @@ class CLIApp:
         return {"program_name": program_name, "author_pubkey": author_pubkey}
 
     def _prompt_secret(self, message: str, *, confirmation: bool = False, allow_master: bool = True) -> str:
-        if allow_master and self._master_passphrase is not None:
-            return self._master_passphrase
-        while True:
-            value = self.session.prompt(f"{message}: ", is_password=True)
-            if not confirmation:
-                return value
-            confirm = self.session.prompt("Confirm passphrase: ", is_password=True)
-            if value == confirm:
-                return value
-            self.console.print("[red]Passphrases do not match. Try again.[/red]")
+        return prompt_secret(
+            self.session,
+            self.console,
+            message,
+            master_passphrase=self._master_passphrase,
+            confirmation=confirmation,
+            allow_master=allow_master,
+        )
 
     def _prompt_text(self, message: str) -> str:
-        return self.session.prompt(f"{message}: ")
+        return prompt_text(self.session, message)
 
     def _update_wallet_metadata(self, status: WalletStatus, *, balance: float | None) -> None:
-        metadata = self.session_context.metadata
-        if not status.exists:
-            metadata.wallet_status = "missing"
-            metadata.wallet_balance = None
-            return
-        lock_state = "Unlocked" if status.is_unlocked else "Locked"
-        address = status.masked_address if status.public_key else "---"
-        metadata.wallet_status = f"{lock_state} ({address})"
-        metadata.wallet_balance = balance
+        update_wallet_metadata(self.session_context.metadata, status, balance=balance)
 
     def _fetch_balance(self, public_key: str | None) -> float | None:
-        if not public_key or self.rpc_client is None:
-            return None
-        try:
-            return self.rpc_client.get_balance(public_key)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Unable to fetch balance for %s: %s", public_key, exc)
-            return None
-
-    @staticmethod
-    def _format_export_text(export_data: dict[str, object]) -> str:
-        metadata = export_data.get("metadata", {})
-        transcript = export_data.get("transcript", [])
-        lines = ["Session Export", "=============="]
-        if isinstance(metadata, dict):
-            for key in (
-                "session_id",
-                "created_at",
-                "updated_at",
-                "active_project",
-                "wallet_status",
-                "wallet_balance",
-                "spend_amount",
-            ):
-                if key in metadata and metadata[key] is not None:
-                    lines.append(f"{key.replace('_', ' ').title()}: {metadata[key]}")
-        lines.append("")
-        lines.append("Transcript (most recent first):")
-        if isinstance(transcript, list) and transcript:
-            for entry in transcript:
-                if isinstance(entry, dict):
-                    role = entry.get("role", "?")
-                    message = entry.get("message", "")
-                    timestamp = entry.get("timestamp")
-                    prefix = f"{timestamp} " if timestamp else ""
-                    lines.append(f"{prefix}[{role}] {message}")
-                    tool_calls = entry.get("tool_calls")
-                    if isinstance(tool_calls, list):
-                        for tool_call in tool_calls:
-                            if not isinstance(tool_call, dict):
-                                continue
-                            call_type = tool_call.get("type", "tool")
-                            name = tool_call.get("name") or ""
-                            status = tool_call.get("status") or ""
-                            summary = tool_call.get("summary") or ""
-                            details = " • ".join(
-                                part for part in (name, status, summary) if part
-                            )
-                            lines.append(f"    ↳ {call_type}: {details}")
-                else:
-                    lines.append(str(entry))
-        else:
-            lines.append("(no transcript available)")
-        return "\n".join(lines)
+        return fetch_balance(self.rpc_client, public_key)
 
     def _write_secret_file(self, target: Path, secret: str) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)

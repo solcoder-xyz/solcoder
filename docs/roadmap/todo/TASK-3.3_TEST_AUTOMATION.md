@@ -3,7 +3,7 @@
 - Milestone: [MILESTONE-6_DEMO_POLISH](../milestones/MILESTONE-6_DEMO_POLISH.md)
 
 ## Objective
-Expand automated testing to hit ≥80% coverage for `src/solcoder/core` and `src/solcoder/solana`, adding e2e scripts that exercise onboarding through deploy.
+Expand automated testing to hit ≥80% coverage for `src/solcoder/core` (including the modular `core/llm/` package) and `src/solcoder/solana`, adding e2e scripts that exercise onboarding through deploy.
 
 ## Deliverables
 - Additional unit tests covering spend policy edge cases, RPC failure retries, and CLI command flows.

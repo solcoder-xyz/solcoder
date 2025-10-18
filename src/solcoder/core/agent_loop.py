@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from rich.console import Console
 
-from solcoder.cli.types import CommandResponse, LLMBackend
 from solcoder.core import (
     AgentMessageError,
     AgentToolResult,
@@ -24,6 +23,9 @@ from solcoder.session import SessionMetadata
 DEFAULT_AGENT_MAX_ITERATIONS = 1000
 AGENT_PLAN_ACK = json.dumps({"type": "plan_ack", "status": "ready"})
 
+if TYPE_CHECKING:  # pragma: no cover
+    from solcoder.cli.types import CommandResponse, LLMBackend
+
 
 @dataclass
 class AgentLoopContext:
@@ -31,7 +33,7 @@ class AgentLoopContext:
 
     prompt: str
     history: Sequence[dict[str, str]]
-    llm: LLMBackend
+    llm: "LLMBackend"
     tool_registry: ToolRegistry
     console: Console
     config_context: ConfigContext | None
@@ -40,8 +42,10 @@ class AgentLoopContext:
     max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS
 
 
-def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
+def run_agent_loop(ctx: AgentLoopContext) -> "CommandResponse":
     """Execute the agent loop using the provided context."""
+    from solcoder.cli.types import CommandResponse  # Local import to avoid circular dependency
+
     manifest = build_tool_manifest(ctx.tool_registry)
     manifest_json = manifest_to_prompt_section(manifest)
     system_prompt = _agent_system_prompt(ctx.config_context, manifest_json)

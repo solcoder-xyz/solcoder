@@ -141,7 +141,7 @@ SolCoder is a CLI-first AI agent that bootstraps your Solana environment, manage
 3. Wallet service (`src/solcoder/solana/wallet.py`): keygen, encryption, spend meter, autopolicy.
 4. Deploy adapters (`src/solcoder/solana/deploy.py`): wrapper around anchor CLI with structured output.
 5. Tool registry (`src/solcoder/agent/tools.py`): callable entries + metadata for LLM tools.
-6. LLM client (`src/solcoder/agent/llm_client.py`): streaming, retries, offline fallback.
+6. LLM client (`src/solcoder/core/llm/client.py`): streaming, retries, offline fallback.
 7. Knowledge services (`knowledge/`, `src/solcoder/knowledge.py`): indexing, search, context injection.
 8. Context builder (`src/solcoder/agent/context_builder.py`): composes files/diffs/knowledge before each LLM call.
 9. Command runner (`src/solcoder/core/commands.py`): whitelisted shell commands with streaming output.
@@ -176,4 +176,3 @@ SolCoder is a CLI-first AI agent that bootstraps your Solana environment, manage
 - [Work Breakdown Structure](./WBS.md) — role mapping, estimates, critical path
 - [Roadmap timeline](./roadmap/milestones/MILESTONE-1_FOUNDATIONS.md) — day-by-day view
 - [Demo collateral] (to be produced in Milestone 6)
-

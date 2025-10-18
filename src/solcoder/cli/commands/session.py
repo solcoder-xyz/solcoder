@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from solcoder.cli.export_utils import format_export_text
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
 from solcoder.session import SessionLoadError
 from solcoder.session.manager import MAX_SESSIONS
@@ -47,11 +48,11 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 tool_summary[0]["summary"] = str(exc)
                 return CommandResponse(messages=[("system", f"Failed to load session: {exc}")], tool_calls=tool_summary)
 
-            content = app._format_export_text(export_data)
+            content = format_export_text(export_data)
             return CommandResponse(messages=[("system", content)], tool_calls=tool_summary)
 
         if command.lower() == "compact":
-            summary = app._force_compact_history()
+            summary = app.force_compact_history()
             return CommandResponse(messages=[("system", summary)])
 
         return CommandResponse(messages=[("system", "Unknown session command. Try `/session export <id>`.")])
