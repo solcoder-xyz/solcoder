@@ -118,12 +118,23 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
             session_id = ctx.session_metadata.session_id
             filename = f"{timestamp}_iter{iteration:04d}_{session_id}.json"
+            prompt_entry: dict[str, Any] = {"raw": prompt}
+            prompt_stripped = prompt.strip()
+            if prompt_stripped:
+                try:
+                    parsed = json.loads(prompt_stripped)
+                except json.JSONDecodeError:
+                    parsed = None
+                if parsed is not None:
+                    prompt_entry["parsed"] = parsed
+                    if isinstance(parsed, dict) and "type" in parsed:
+                        prompt_entry["type"] = parsed.get("type")
             payload = {
                 "session_id": session_id,
                 "timestamp": timestamp,
                 "iteration": iteration,
                 "system_prompt": system_prompt,
-                "prompt": prompt,
+                "prompt": prompt_entry,
                 "history": list(history),
             }
             (llm_log_dir / filename).write_text(
