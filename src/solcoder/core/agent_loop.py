@@ -84,6 +84,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     )
     plan_added_tasks = False
     llm_log_dir = Path(".solcoder/logs/llm")
+    had_invalid_directive = False
 
     provider_name, model_name, reasoning_effort = _active_model_details(
         ctx.config_context
@@ -191,13 +192,20 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         )
         loop_history.append({"role": "system", "content": instruction})
 
-    def _bootstrap_plan_into_todo(steps: list[str] | None, plan_message: str | None) -> bool:
+    def _bootstrap_plan_into_todo(
+        steps: list[str] | None,
+        plan_message: str | None,
+        *,
+        allow_single_step: bool = False,
+    ) -> bool:
         if ctx.todo_manager is None:
             return False
         cleaned_steps = [step.strip() for step in steps or [] if step and step.strip()]
         if not cleaned_steps:
             return False
         existing_tasks = ctx.todo_manager.tasks()
+        if len(cleaned_steps) < 2 and not existing_tasks and not allow_single_step:
+            return False
         existing_titles = {_todo_normalize_title(task.title) for task in existing_tasks}
         added = False
         for step in cleaned_steps:
@@ -358,6 +366,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         rendered_roles.add("system")
                         break
                     logger.warning("Invalid agent directive: %s", exc)
+                    had_invalid_directive = True
                     retry_payload = json.dumps(
                         {
                             "type": "error",
@@ -382,7 +391,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             else None
                         )
                         plan_received = True
-                        auto_rendered = _bootstrap_plan_into_todo(directive.steps, directive.message)
+                        auto_rendered = _bootstrap_plan_into_todo(
+                            directive.steps,
+                            directive.message,
+                            allow_single_step=had_invalid_directive,
+                        )
                         if (
                             not preexisting_unfinished
                             and ctx.todo_manager is not None
@@ -405,6 +418,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                                 directive.steps[0], style="solcoder.status.text"
                             )
                         pending_prompt = AGENT_PLAN_ACK
+                        had_invalid_directive = False
                         continue
 
                     sequence_warning = _enforce_task_sequence()
@@ -469,7 +483,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         if ctx.todo_manager is not None
                         else None
                     )
-                    if not _bootstrap_plan_into_todo(directive.steps, directive.message):
+                    if not _bootstrap_plan_into_todo(
+                        directive.steps,
+                        directive.message,
+                        allow_single_step=had_invalid_directive,
+                    ):
                         plan_text = _format_plan_message(
                             directive.steps or [], directive.message
                         )
@@ -502,6 +520,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             directive.steps[0], style="solcoder.status.text"
                         )
                     pending_prompt = AGENT_PLAN_ACK
+                    had_invalid_directive = False
                     continue
 
                 sequence_warning = _enforce_task_sequence()
