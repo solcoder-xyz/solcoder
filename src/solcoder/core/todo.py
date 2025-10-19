@@ -79,7 +79,8 @@ class TodoManager:
         normalized = _normalize_title(title)
         if _is_management_task(normalized):
             raise ValueError("Task describes TODO management and was skipped.")
-        self._check_revision(expected_revision)
+        if self._check_revision(expected_revision):
+            raise ValueError("TODO list has changed. Refresh tasks and retry.")
         duplicate = self._find_duplicate(normalized)
         if duplicate and duplicate.status != "done":
             raise ValueError(f"Task already exists: {duplicate.id}")
@@ -109,7 +110,8 @@ class TodoManager:
         status: TaskStatus | None = None,
         expected_revision: int | None = None,
     ) -> TodoItem:
-        self._check_revision(expected_revision)
+        if self._check_revision(expected_revision):
+            raise ValueError("TODO list has changed. Refresh tasks and retry.")
         task = self._find_task(task_id)
         if title is not None:
             if not title.strip():
@@ -130,14 +132,16 @@ class TodoManager:
         return task
 
     def mark_complete(self, task_id: str, *, expected_revision: int | None = None) -> TodoItem:
-        self._check_revision(expected_revision)
+        if self._check_revision(expected_revision):
+            raise ValueError("TODO list has changed. Refresh tasks and retry.")
         task = self._find_task(task_id)
         self._apply_status(task, "done")
         self._touch()
         return task
 
     def set_active(self, task_id: str, *, expected_revision: int | None = None) -> TodoItem:
-        self._check_revision(expected_revision)
+        if self._check_revision(expected_revision):
+            raise ValueError("TODO list has changed. Refresh tasks and retry.")
         task = self._find_task(task_id)
         if task.status == "done":
             raise ValueError("Completed tasks cannot be set active.")
@@ -146,7 +150,8 @@ class TodoManager:
         return task
 
     def remove_task(self, task_id: str, *, expected_revision: int | None = None) -> None:
-        self._check_revision(expected_revision)
+        if self._check_revision(expected_revision):
+            raise ValueError("TODO list has changed. Refresh tasks and retry.")
         task = self._find_task(task_id)
         was_active = task.status == "in_progress"
         self._tasks.remove(task)
