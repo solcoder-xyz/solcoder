@@ -689,6 +689,27 @@ def test_todo_command_add_and_complete(
     assert any("[[RENDER_TODO_PANEL]]" in message for _, message in plan_response.messages)
 
 
+def test_todo_command_respects_quotes(
+    console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    response = app.handle_line("/todo add \"Fix bug\" --desc 'repro steps in staging'")
+    assert response.messages
+    tasks = app.todo_manager.tasks()
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task.title == "Fix bug"
+    assert task.description == "repro steps in staging"
+
+
 def test_todo_persistence_across_sessions(
     console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
 ) -> None:

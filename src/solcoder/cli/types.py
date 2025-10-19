@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shlex
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
@@ -63,7 +64,11 @@ class CommandRouter:
         return self._commands.values()
 
     def dispatch(self, app: CLIApp, raw_line: str) -> CommandResponse:
-        parts = raw_line.strip().split()
+        try:
+            parts = shlex.split(raw_line, posix=True)
+        except ValueError as exc:
+            logger.info("Failed to parse slash command '%s': %s", raw_line, exc)
+            return CommandResponse(messages=[("system", f"Invalid command syntax: {exc}")])
         if not parts:
             return CommandResponse(messages=[])
         command_name, *args = parts
