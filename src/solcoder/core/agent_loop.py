@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,6 +12,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from rich.console import Console
 from rich.text import Text
+
+# We intentionally avoid importing the logging module to keep dependencies minimal.
 
 from solcoder.core import (
     AgentMessageError,
@@ -67,6 +70,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     rendered_roles: set[str] = set()
     display_messages: list[tuple[str, str]] = []
     tool_summaries: list[dict[str, Any]] = []
+    logger = logging.getLogger(__name__)
     total_latency = 0.0
     total_input_tokens = 0
     total_output_tokens = 0
@@ -194,8 +198,6 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         if not cleaned_steps:
             return False
         existing_tasks = ctx.todo_manager.tasks()
-        if not existing_tasks and len(cleaned_steps) < 2:
-            return False
         existing_titles = {_todo_normalize_title(task.title) for task in existing_tasks}
         added = False
         for step in cleaned_steps:
@@ -355,10 +357,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         ctx.render_message("system", error_message)
                         rendered_roles.add("system")
                         break
-                    error_message = f"Invalid agent directive: {exc}"
-                    display_messages.append(("system", error_message))
-                    ctx.render_message("system", error_message)
-                    rendered_roles.add("system")
+                    logger.warning("Invalid agent directive: %s", exc)
                     retry_payload = json.dumps(
                         {
                             "type": "error",
@@ -474,8 +473,20 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         plan_text = _format_plan_message(
                             directive.steps or [], directive.message
                         )
-                        display_messages.append(("agent", plan_text))
-                        ctx.render_message("agent", plan_text)
+                        todo_render = (
+                            ctx.todo_manager.render()
+                            if ctx.todo_manager is not None
+                            else "[[RENDER_TODO_PANEL]]"
+                        )
+                        combined_message = (
+                            f"{todo_render}\n\n{plan_text}"
+                            if plan_text.strip()
+                            else todo_render
+                        )
+                        if ctx.todo_manager is not None:
+                            todo_render_revision = ctx.todo_manager.revision
+                        display_messages.append(("agent", combined_message))
+                        ctx.render_message("agent", combined_message)
                         rendered_roles.add("agent")
                     if (
                         not preexisting_unfinished
