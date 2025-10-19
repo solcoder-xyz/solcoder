@@ -217,10 +217,9 @@ class CLIApp:
         register_builtin_commands(self, self.command_router)
         self._load_todo_state()
         self.tool_registry = tool_registry or build_default_registry()
-        try:
-            self.tool_registry.add_toolkit(todo_toolkit(self.todo_manager))
-        except ToolkitAlreadyRegisteredError:
-            logger.debug("Todo toolkit already registered; skipping duplicate add.")
+        self.tool_registry.add_toolkit(
+            todo_toolkit(self.todo_manager), overwrite=True
+        )
         initial_status = self.wallet_manager.status()
         initial_balance = fetch_balance(self.rpc_client, initial_status.public_key)
         update_wallet_metadata(
