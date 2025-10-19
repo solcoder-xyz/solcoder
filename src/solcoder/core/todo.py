@@ -160,7 +160,8 @@ class TodoManager:
         self._touch()
 
     def clear(self, *, expected_revision: int | None = None) -> None:
-        self._check_revision(expected_revision)
+        if self._check_revision(expected_revision):
+            raise ValueError("TODO list has changed. Refresh tasks and retry.")
         self._tasks.clear()
         self._counter = itertools.count(1)
         self._touch()
