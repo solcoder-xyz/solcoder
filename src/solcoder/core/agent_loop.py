@@ -47,6 +47,7 @@ class AgentLoopContext:
     config_context: ConfigContext | None
     session_metadata: SessionMetadata
     render_message: Callable[[str, str], None]
+    print_raw_llm: bool = False
     todo_manager: TodoManager | None = None
     initial_todo_message: str | None = None
     max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS
@@ -151,6 +152,17 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
             )
         except Exception:  # noqa: BLE001
             pass
+
+    def _emit_raw_llm_response(raw_reply: str) -> None:
+        if not ctx.print_raw_llm:
+            return
+        if not raw_reply:
+            return
+        try:
+            ctx.console.print("LLM raw response:")
+            ctx.console.print(raw_reply)
+        except Exception:  # noqa: BLE001
+            logger.debug("Unable to print raw LLM response", exc_info=True)
 
     iteration = 0
     cancelled = False
@@ -344,6 +356,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
                 reply_text = "".join(tokens) or getattr(result, "text", "")
                 loop_history.append({"role": "user", "content": pending_prompt})
+                _emit_raw_llm_response(reply_text)
 
                 if not reply_text:
                     error_message = "LLM returned an empty directive."

@@ -164,6 +164,7 @@ class CLIApp:
         wallet_manager: WalletManager | None = None,
         rpc_client: SolanaRPCClient | None = None,
         tool_registry: ToolRegistry | None = None,
+        print_raw_llm: bool | None = None,
     ) -> None:
         base_console = console or CLIApp._default_console()
         if console is not None and not getattr(
@@ -198,6 +199,13 @@ class CLIApp:
             config_context=self.config_context,
         )
         self.log_buffer = LogBuffer()
+        env_flag = os.environ.get("SOLCODER_PRINT_RAW_LLM")
+        if print_raw_llm is None:
+            print_raw_llm = (
+                env_flag is not None
+                and env_flag.strip().lower() not in {"", "0", "false", "no"}
+            )
+        self._print_raw_llm = bool(print_raw_llm)
         self._agent_mode = DEFAULT_AGENT_MODE
         self.status_bar = StatusBar(
             console=self._console,
@@ -363,6 +371,7 @@ class CLIApp:
             config_context=self.config_context,
             session_metadata=self.session_context.metadata,
             render_message=self._render_message,
+            print_raw_llm=self._print_raw_llm,
             todo_manager=self.todo_manager,
             initial_todo_message=self._todo_history_snapshot(),
             max_iterations=self._max_agent_iterations(),
