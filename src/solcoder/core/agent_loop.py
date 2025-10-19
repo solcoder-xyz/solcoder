@@ -28,7 +28,7 @@ from solcoder.core.todo import _normalize_title as _todo_normalize_title
 from solcoder.core.tool_registry import ToolRegistry, ToolRegistryError
 from solcoder.session import SessionMetadata
 
-DEFAULT_AGENT_MAX_ITERATIONS = 1000
+DEFAULT_AGENT_MAX_ITERATIONS = 100
 AGENT_PLAN_ACK = json.dumps({"type": "plan_ack", "status": "ready"})
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -344,7 +344,6 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
                 reply_text = "".join(tokens) or getattr(result, "text", "")
                 loop_history.append({"role": "user", "content": pending_prompt})
-                loop_history.append({"role": "assistant", "content": reply_text})
 
                 if not reply_text:
                     error_message = "LLM returned an empty directive."
@@ -380,6 +379,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     pending_prompt = retry_payload
                     continue
 
+                loop_history.append({"role": "assistant", "content": reply_text})
                 retry_payload = None
                 _accumulate_usage(result)
 
@@ -559,12 +559,6 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     if is_todo_tool:
                         _show_current_todo_panel()
 
-                    if isinstance(payload_data, dict) and payload_data.get("exit_app"):
-                        should_exit = True
-                        status_message = Text("Closing session…", style="solcoder.status.text")
-                        status_indicator.update(status_message)
-                    _append_todo_instruction(step_title)
-
                     summary_entry: dict[str, Any] = {
                         "type": "tool",
                         "name": tool_name,
@@ -574,6 +568,20 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     if payload_data is not None:
                         summary_entry["data"] = payload_data
                     tool_summaries.append(summary_entry)
+
+                    if isinstance(payload_data, dict) and payload_data.get("exit_app"):
+                        should_exit = True
+                        status_message = Text("Closing session…", style="solcoder.status.text")
+                        status_indicator.update(status_message)
+                        farewell = str(payload_data.get("farewell") or "Session closed. Goodbye!")
+                        display_messages.append(("agent", farewell))
+                        ctx.render_message("agent", farewell)
+                        rendered_roles.add("agent")
+                        _append_active_summary()
+                        _show_current_todo_panel()
+                        _handle_completion_todo()
+                        break
+                    _append_todo_instruction(step_title)
 
                     tool_payload = AgentToolResult(
                         tool_name=tool_name,
@@ -716,7 +724,9 @@ def _agent_system_prompt(
         "leave it out to keep the list hidden.\n"
         "9. If the user indicates they want to end the conversation or close SolCoder, invoke the "
         "quit tool to terminate the session gracefully, then acknowledge the shutdown with a final reply.\n"
-        "10. Only create new TODO items when they represent genuinely new work. If a task already exists, update or complete it instead of adding a paraphrased duplicate.\n"
+        "10. Every response must be a single JSON object matching the schema above. Non-compliant outputs will be ignored and you will be asked once to retry.\n"
+        "11. To run commands or make filesystem changes, you must call execute_shell_command via a tool_request. Never embed raw shell or here-doc snippets in your JSON.\n"
+        "12. Only create new TODO items when they represent genuinely new work. If a task already exists, update or complete it instead of adding a paraphrased duplicate.\n"
     )
 
     active_task = None
@@ -727,15 +737,18 @@ def _agent_system_prompt(
 
     if active_task:
         rules += (
-            "10. Current active task: "
+            "13. Current active task: "
             f"{active_task}. Keep progress focused here and update or complete it before emitting your final reply.\n"
         )
     else:
         rules += (
-            "10. If you begin multi-step work, set one TODO entry to in_progress and keep it updated until completion before replying.\n"
+            "13. If you begin multi-step work, set one TODO entry to in_progress and keep it updated until completion before replying.\n"
         )
 
-    rules += "\n"
+    rules += (
+        "\nGood example: {\"type\":\"tool_request\",\"step_title\":\"List files\",\"tool\":{\"name\":\"execute_shell_command\",\"args\":{\"command\":[\"ls\",\"-la\"]}}}.\n"
+        "Bad example: 'Sure, here is the command:' followed by raw shell text.\n\n"
+    )
 
     return (
         "You are SolCoder, an on-device coding assistant. Always respond with a single "
