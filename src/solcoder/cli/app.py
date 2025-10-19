@@ -497,7 +497,7 @@ class CLIApp:
     def _todo_history_snapshot(self) -> str | None:
         if not self.todo_manager or not self.todo_manager.tasks():
             return None
-        todo_render = self.todo_manager.render()
+        todo_render = self.todo_manager.render_plain()
         guidance = (
             "Update the TODO list with todo_* tools or the /todo command as work progresses. "
             "Only add new steps that are not already present."
