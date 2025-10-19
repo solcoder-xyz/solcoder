@@ -64,6 +64,8 @@ def build_payload(settings: LLMSettings, messages: list[dict[str, str]]) -> dict
             payload["reasoning"] = {"effort": settings.reasoning_effort}
     else:
         payload["messages"] = messages
+        if provider in {"anthropic", "claude"}:
+            payload["max_tokens"] = max(settings.max_output_tokens, 1)
     return payload
 
 

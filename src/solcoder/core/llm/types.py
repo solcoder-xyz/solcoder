@@ -20,6 +20,7 @@ class LLMSettings:
     max_retries: int = 2
     offline_mode: bool = False
     reasoning_effort: str = "medium"
+    max_output_tokens: int = 1024
 
 
 @dataclass(slots=True)
