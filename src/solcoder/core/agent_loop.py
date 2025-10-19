@@ -187,7 +187,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         )
         loop_history.append({"role": "system", "content": instruction})
 
-    def _bootstrap_plan_into_todo(steps: list[str] | None) -> bool:
+    def _bootstrap_plan_into_todo(steps: list[str] | None, plan_message: str | None) -> bool:
         if ctx.todo_manager is None:
             return False
         cleaned_steps = [step.strip() for step in steps or [] if step and step.strip()]
@@ -216,8 +216,13 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         todo_render = ctx.todo_manager.render()
         nonlocal todo_render_revision
         todo_render_revision = ctx.todo_manager.revision
-        display_messages.append(("agent", todo_render))
-        ctx.render_message("agent", todo_render)
+        plan_text = _format_plan_message(steps or [], plan_message)
+        if plan_text.strip():
+            combined_message = f"{todo_render}\n\n{plan_text}"
+        else:
+            combined_message = todo_render
+        display_messages.append(("agent", combined_message))
+        ctx.render_message("agent", combined_message)
         rendered_roles.add("agent")
         return True
 
@@ -378,7 +383,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             else None
                         )
                         plan_received = True
-                        auto_rendered = _bootstrap_plan_into_todo(directive.steps)
+                        auto_rendered = _bootstrap_plan_into_todo(directive.steps, directive.message)
                         if (
                             not preexisting_unfinished
                             and ctx.todo_manager is not None
@@ -465,7 +470,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         if ctx.todo_manager is not None
                         else None
                     )
-                    if not _bootstrap_plan_into_todo(directive.steps):
+                    if not _bootstrap_plan_into_todo(directive.steps, directive.message):
                         plan_text = _format_plan_message(
                             directive.steps or [], directive.message
                         )
