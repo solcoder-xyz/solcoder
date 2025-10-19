@@ -746,7 +746,7 @@ def _agent_system_prompt(
         )
 
     rules += (
-        "\nGood example: {\"type\":\"tool_request\",\"step_title\":\"List files\",\"tool\":{\"name\":\"execute_shell_command\",\"args\":{\"command\":[\"ls\",\"-la\"]}}}.\n"
+        "\nGood example: {\"type\":\"tool_request\",\"step_title\":\"List files\",\"tool\":{\"name\":\"execute_shell_command\",\"args\":{\"command\":\"ls -la\"}}}.\n"
         "Bad example: 'Sure, here is the command:' followed by raw shell text.\n\n"
     )
 
