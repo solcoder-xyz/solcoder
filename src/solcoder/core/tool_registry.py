@@ -29,11 +29,16 @@ class ToolRegistry:
 
     def add_toolkit(self, toolkit: Toolkit, *, overwrite: bool = False) -> None:
         previous_toolkit = self._toolkits.get(toolkit.name)
+        previous_tools: list[str] = []
         if previous_toolkit is not None:
             if not overwrite:
-                raise ToolkitAlreadyRegisteredError(f"Toolkit '{toolkit.name}' already registered")
-            for tool in previous_toolkit.tools:
-                self.unregister(tool.name)
+                raise ToolkitAlreadyRegisteredError(
+                    f"Toolkit '{toolkit.name}' already registered"
+                )
+            previous_tools = [tool.name for tool in previous_toolkit.tools]
+            for tool_name in previous_tools:
+                self.unregister(tool_name)
+
         registered: list[str] = []
         try:
             for tool in toolkit.tools:
@@ -42,7 +47,12 @@ class ToolRegistry:
         except Exception:
             for tool_name in registered:
                 self.unregister(tool_name)
+            if previous_toolkit is not None:
+                for tool in previous_toolkit.tools:
+                    self.register(tool, overwrite=True)
+                self._toolkits[toolkit.name] = previous_toolkit
             raise
+
         self._toolkits[toolkit.name] = toolkit
 
     def register(self, tool: Tool, *, overwrite: bool = False) -> None:
