@@ -45,7 +45,11 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 app.log_event("wallet", "Wallet status requested (missing)", severity="warning")
                 return CommandResponse(messages=[("system", "No wallet found. Run `/wallet create` to set one up.")])
             lock_state = "Unlocked" if status.is_unlocked else "Locked"
-            balance_line = f"Balance: {balance:.3f} SOL" if balance is not None else "Balance: unavailable"
+            spend_amount = getattr(app.session_context.metadata, "spend_amount", 0.0) or 0.0
+            if balance is not None:
+                balance_line = f"Balance: {balance:.3f} SOL (spent {spend_amount:.3f} SOL)"
+            else:
+                balance_line = f"Balance: unavailable (spent {spend_amount:.3f} SOL)"
             qr_block = _address_qr_block(status.public_key or "")
             message = "\n".join(
                 [

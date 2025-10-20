@@ -115,9 +115,11 @@ class StatusBar:
             wallet_icon = "⚠️"
             wallet_display = "missing wallet"
         wallet_display = f"{wallet_display} {wallet_icon}".strip()
-        balance_display = (
-            f"{metadata.wallet_balance:.3f} SOL" if metadata.wallet_balance is not None else "--"
-        )
+        spent = metadata.spend_amount or 0.0
+        if metadata.wallet_balance is not None:
+            balance_display = f"{metadata.wallet_balance:.3f} SOL (spent {spent:.3f})"
+        else:
+            balance_display = f"-- (spent {spent:.3f})"
         input_limit = self._context_manager.config_int("llm_input_token_limit", DEFAULT_LLM_INPUT_LIMIT)
         recent_input = metadata.llm_last_input_tokens or 0
         percent_input = min((recent_input / input_limit * 100) if input_limit else 0.0, 100.0)
