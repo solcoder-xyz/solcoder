@@ -5,6 +5,8 @@
 ## Objective
 Extend wallet services to manage balances, request devnet airdrops, and enforce session spend caps through CLI commands and automated triggers.
 
+_Done — 2025-10-20 (CLI agent)_
+
 ## Deliverables
 - Balance polling utility hitting Solana RPC with graceful degradation.
 - `/wallet airdrop`, `/wallet status`, and `/wallet policy` subcommands exposing current limits.
