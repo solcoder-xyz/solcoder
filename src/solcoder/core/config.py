@@ -43,6 +43,8 @@ class SolCoderConfig(BaseModel):
     rpc_url: str = "https://api.devnet.solana.com"
     max_session_spend: float = 0.2
     auto_airdrop: bool = True
+    auto_airdrop_threshold: float = 0.5
+    auto_airdrop_cooldown_secs: int = 30
     telemetry: bool = False
     llm_provider: str = "openai"
     llm_base_url: str = "https://api.openai.com/v1"
@@ -319,6 +321,26 @@ class ConfigManager:
             updates["llm_output_token_limit"] = llm_output_token_limit
         if history_compaction_cooldown is not None:
             updates["history_compaction_cooldown"] = history_compaction_cooldown
+        if updates:
+            self._update_base_config(**updates)
+
+    def update_wallet_policy(
+        self,
+        *,
+        max_session_spend: float | None = None,
+        auto_airdrop: bool | None = None,
+        auto_airdrop_threshold: float | None = None,
+        auto_airdrop_cooldown_secs: int | None = None,
+    ) -> None:
+        updates: dict[str, object] = {}
+        if max_session_spend is not None:
+            updates["max_session_spend"] = float(max_session_spend)
+        if auto_airdrop is not None:
+            updates["auto_airdrop"] = bool(auto_airdrop)
+        if auto_airdrop_threshold is not None:
+            updates["auto_airdrop_threshold"] = float(auto_airdrop_threshold)
+        if auto_airdrop_cooldown_secs is not None:
+            updates["auto_airdrop_cooldown_secs"] = int(auto_airdrop_cooldown_secs)
         if updates:
             self._update_base_config(**updates)
 

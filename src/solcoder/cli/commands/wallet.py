@@ -94,6 +94,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     "  phrase              Display recovery mnemonic (requires passphrase).",
                     "  send <addr> <amt>   Transfer SOL after confirmation and passphrase check.",
                     "  airdrop [amt]       Request a faucet airdrop on devnet/testnet (default 2 SOL).",
+                    "  policy [show|set <cap>|auto <on|off>|threshold <sol>|cooldown <secs>]",
                 ]
             )
             return CommandResponse(messages=[("system", usage)])
@@ -261,6 +262,74 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             if wallet_balance is not None:
                 response_lines.append(f"Wallet balance: {wallet_balance:.3f} SOL")
             return CommandResponse(messages=[("system", "\n".join(response_lines))])
+
+        if command == "policy":
+            cfg_ctx = getattr(app, "config_context", None)
+            cfg_mgr = getattr(app, "config_manager", None)
+            if cfg_ctx is None or cfg_mgr is None:
+                return CommandResponse(messages=[("system", "Configuration manager unavailable.")])
+
+            def _show() -> CommandResponse:
+                cfg = cfg_ctx.config
+                lines = [
+                    "Wallet Policy:",
+                    f"  Max session spend: {cfg.max_session_spend:.3f} SOL (0 disables cap)",
+                    f"  Auto airdrop: {'on' if cfg.auto_airdrop else 'off'}",
+                    f"  Airdrop threshold: {getattr(cfg, 'auto_airdrop_threshold', 0.0):.3f} SOL",
+                    f"  Airdrop cooldown: {getattr(cfg, 'auto_airdrop_cooldown_secs', 0)} seconds",
+                ]
+                return CommandResponse(messages=[("system", "\n".join(lines))])
+
+            if not rest or rest[0] == "show":
+                return _show()
+
+            sub = rest[0]
+            args_rem = rest[1:]
+            try:
+                if sub == "set":
+                    if not args_rem:
+                        return CommandResponse(messages=[("system", "Usage: /wallet policy set <cap>")])
+                    cap = float(args_rem[0])
+                    if cap < 0:
+                        return CommandResponse(messages=[("system", "Cap must be zero or positive.")])
+                    # Persist
+                    cfg_mgr.update_wallet_policy(max_session_spend=cap)
+                    # Refresh in-memory config
+                    cfg_ctx.config.max_session_spend = cap
+                    return CommandResponse(messages=[("system", f"Max session spend set to {cap:.3f} SOL.")])
+
+                if sub == "auto":
+                    if not args_rem or args_rem[0].lower() not in {"on", "off"}:
+                        return CommandResponse(messages=[("system", "Usage: /wallet policy auto <on|off>")])
+                    val = args_rem[0].lower() == "on"
+                    cfg_mgr.update_wallet_policy(auto_airdrop=val)
+                    cfg_ctx.config.auto_airdrop = val
+                    state = "on" if val else "off"
+                    return CommandResponse(messages=[("system", f"Auto airdrop turned {state}.")])
+
+                if sub == "threshold":
+                    if not args_rem:
+                        return CommandResponse(messages=[("system", "Usage: /wallet policy threshold <sol>")])
+                    threshold = float(args_rem[0])
+                    if threshold < 0:
+                        return CommandResponse(messages=[("system", "Threshold must be zero or positive.")])
+                    cfg_mgr.update_wallet_policy(auto_airdrop_threshold=threshold)
+                    setattr(cfg_ctx.config, "auto_airdrop_threshold", threshold)
+                    return CommandResponse(messages=[("system", f"Airdrop threshold set to {threshold:.3f} SOL.")])
+
+                if sub == "cooldown":
+                    if not args_rem:
+                        return CommandResponse(messages=[("system", "Usage: /wallet policy cooldown <secs>")])
+                    cooldown = int(float(args_rem[0]))
+                    if cooldown < 0:
+                        return CommandResponse(messages=[("system", "Cooldown must be zero or positive seconds.")])
+                    cfg_mgr.update_wallet_policy(auto_airdrop_cooldown_secs=cooldown)
+                    setattr(cfg_ctx.config, "auto_airdrop_cooldown_secs", cooldown)
+                    return CommandResponse(messages=[("system", f"Airdrop cooldown set to {cooldown} seconds.")])
+
+                return CommandResponse(messages=[("system", "Usage: /wallet policy [show|set <cap>|auto <on|off>|threshold <sol>|cooldown <secs>]")])
+            except ValueError:
+                return CommandResponse(messages=[("system", "Numeric value expected.")])
 
         if command == "airdrop":
             status = manager.status()
