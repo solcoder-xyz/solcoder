@@ -1,84 +1,403 @@
-# SolCoder
+```
+   @@@@@@    @@@@@@   @@@        @@@@@@@   @@@@@@   @@@@@@@   @@@@@@@@  @@@@@@@
+  @@@@@@@   @@@@@@@@  @@@       @@@@@@@@  @@@@@@@@  @@@@@@@@  @@@@@@@@  @@@@@@@@
+  !@@       @@!  @@@  @@!       !@@       @@!  @@@  @@!  @@@  @@!       @@!  @@@
+  !@!       !@!  @!@  !@!       !@!       !@!  @!@  !@!  @!@  !@!       !@!  @!@
+  !!@@!!    @!@  !@!  @!!       !@!       @!@  !@!  @!@  !@!  @!!!:!    @!@!!@!
+   !!@!!!   !@!  !!!  !!!       !!!       !@!  !!!  !@!  !!!  !!!!!:    !!@!@!
+       !:!  !!:  !!!  !!:       :!!       !!:  !!!  !!:  !!!  !!:       !!: :!!
+      !:!   :!:  !:!   :!:      :!:       :!:  !:!  :!:  !:!  :!:       :!:  !:!
+  :::: ::   ::::: ::   :: ::::   ::: :::  ::::: ::   :::: ::   :: ::::  ::   :::
+  :: : :     : :  :   : :: : :   :: :: :   : :  :   :: :  :   : :: ::    :   : :
+```
 
-SolCoder is a CLI-first AI coding agent that scaffolds, deploys, and funds Solana dApps directly from natural-language prompts. It blends LLM-assisted planning, automated environment setup, and wallet-aware deployment so builders can demo a working program on devnet in under a minute.
+# 🚀 Build Solana dApps at Light Speed
 
-## Key Capabilities
-- **Conversational Control**: Drive workflows in natural language while keeping `/commands` available for deterministic actions.
-- **Prompt-to-Deployment**: Generate an Anchor workspace, build it, deploy to devnet, and surface the program ID with explorer links.
-- **Wallet Autonomy**: Manage a dedicated Solana wallet, track live balances from your configured RPC, request devnet airdrops, and enforce session spend caps.
-- **Hands-Free Setup**: Detect missing toolchains (solana-cli, anchor, rust, node) and guide installations when needed.
-- **Mode Switching**: Toggle between planning, coding, and review modes for iterative development from the terminal.
-- **Coding Loop**: Inspect files, apply patches safely, and run tests/lints from natural-language requests (slash commands remain optional).
-- **Config Layers & Tool Controls**: Keep global credentials and defaults under `~/.solcoder/config.toml`, optionally add project overrides in `<project>/.solcoder/config.toml`, define per-tool policies (`allow`, `confirm`, `deny`), toggle behaviour per session, and audit every invocation.
-- **Solana Knowledge Hub**: Query curated summaries of Anchor patterns, SPL token standards, cryptography tips, and runtime notes—powered by optional offline embeddings for semantic search.
+> ***An AI-powered CLI agent that transforms natural-language ideas into fully deployed Solana programs—no boilerplate, no delays, no friction.***
 
-## Quickstart
-1. Install prerequisites: Python 3.11, Solana CLI, Anchor, Rust, Node.js.
-2. Clone this repository and install dependencies:
-   ```bash
-   poetry install
-   ```
-3. Launch the agent:
-   ```bash
-   poetry run solcoder
-   ```
-4. On first launch, follow the prompts to set your LLM base URL and API key—credentials are encrypted and can be rotated later via `/config set`.
-5. Complete the wallet wizard immediately after: choose **Create** or **Restore**, copy the recovery phrase someplace safe, and unlock the wallet so SolCoder can track balances. The passphrase you set for SolCoder encrypts the wallet too—no second password to remember.
-6. Describe the dApp you want to build in plain language; reference project files with `@filename` and lean on slash commands (`/new`, `/deploy`, `/wallet`) only when you need deterministic control.
-7. To resume an earlier run, pass the printed session ID: `poetry run solcoder --session <id>`; use `--new-session` to force a fresh context.
-8. Global setup (LLM credentials, wallet secrets, default config) lives in `~/.solcoder/`. SolCoder also creates `<project>/.solcoder/` to capture session history and logs; drop a `config.toml` there if you need project overrides.
-9. Inspect or tweak session metadata with `/settings`—for example, `/settings wallet <label>` or `/settings spend 0.75`.
-10. Explore the built-in knowledge base: `poetry run solcoder` → `/kb search anchor macros` or ask “Explain the SPL token mint flow”. Rebuild embeddings with `poetry run python scripts/build_kb_index.py` after editing knowledge files.
-11. Manage your Solana wallet via `/wallet`: start with `/wallet status` (shows lock state + current balance), run `/wallet create` to generate a new keypair, `/wallet unlock` to decrypt it for spending, `/wallet phrase` to view the recovery mnemonic (requires passphrase), and `/wallet export [path]` to copy the secret—omit `path` to print JSON, or supply one to write an on-disk backup with 0600 permissions.
-12. Scaffold the reference counter workspace with `poetry run solcoder --template counter ./my-counter --program my_counter`. Inside the REPL you can run `/template counter ./my-counter` with optional `--program`, `--author`, and `--program-id` flags.
-13. Inspect available automation toolkits with `/toolkits list` and `/toolkits <toolkit> tools` to see what the agent can orchestrate deterministically.
+---
 
-## Development Commands
-- `poetry run pytest` — execute unit, integration, and e2e suites.
-- `poetry run ruff check src tests` — lint Python sources and tests.
-- `poetry run black src tests` — format code; add `--check` for CI parity.
-- `poetry run solcoder --help` — inspect CLI flags and modes.
-- `poetry run solcoder --dry-run-llm` — hit the live LLM once to confirm streaming before running full workflows.
+## ✨ **The Vision**
 
-## LLM Configuration
-- The CLI now targets OpenAI's Responses API by default (`gpt-5-codex`).
-- SolCoder stores provider defaults under `~/.solcoder/config.toml`; run `poetry run solcoder` once to walk through the setup wizard.
-- Override provider settings per run with CLI flags such as `--llm-provider`, `--llm-base-url`, `--llm-model`, and `--llm-api-key`.
-- Select the reasoning effort with `--llm-reasoning <low|medium|high>` (defaults to `medium`) or adjust on the fly via `/settings reasoning <level>`.
-- Switch between `gpt-5-codex` and `gpt-5` at runtime using `/settings model <gpt-5|gpt-5-codex>`.
-- Use `--offline-mode` to fall back to deterministic stubbed replies (handy for demos without network access).
-- Combine overrides with `--dry-run-llm` to smoke test connectivity before launching the full REPL.
+SolCoder democratizes Solana development by removing the learning curve and repetitive setup work. Whether you're a hackathon participant pitching a bold DeFi experiment or a seasoned builder iterating at breakneck speed, SolCoder meets you where you are: **describe what you want, and watch it build**.
 
-## Project Layout
-- `src/solcoder/cli/` — Prompt Toolkit REPL, command router, and UI widgets.
-- `src/solcoder/core/` — shared services (config, session state, logging, tool orchestration).
-- `src/solcoder/solana/` — wallet, RPC adapters, build/deploy flows, spend-policy enforcement.
-- `templates/` — reusable Anchor blueprints (counter, NFT mint) plus client/README stubs.
-- `tests/` — mirrors the package layout and holds e2e fixtures.
-- `docs/` — strategy and planning artifacts (PRD, roadmap, WBS, milestones).
+This hackathon edition brings:
+- **Instant scaffolding** from natural-language specs
+- **Built-in wallet management** with encrypted key storage
+- **Live deployment** to devnet with explorer links
+- **Knowledge base** covering Anchor patterns, SPL standards, and Solana best practices
+- **Session persistence** so you can pick up where you left off
 
-## Contributing
-Please read `AGENTS.md` for contributor guidelines covering style, testing, and review expectations. Follow Conventional Commits, keep changes focused, and add regression tests for bug fixes.
+---
 
-## Roadmap & Status
-- Progress is tracked in `docs/roadmap/milestones/`, `docs/roadmap/todo/`, `docs/roadmap/in_progress/`, and `docs/roadmap/done/`.
-- The WBS (`docs/WBS.md`) and PRD (`docs/PRD.md`) outline priorities for the hackathon MVP.
+## 🎯 **Mission & Values**
 
-### Milestones at a Glance
-1. **Foundations & Onboarding** — repo/tooling, config wizard, wallet core, diagnostics, counter template ([MILESTONE-1](docs/roadmap/milestones/MILESTONE-1_FOUNDATIONS.md))
-2. **Conversational Core** — live LLM streaming (`--dry-run-llm`), tool registry skeleton, status/log UX ([MILESTONE-2](docs/roadmap/milestones/MILESTONE-2_CONVERSATIONAL_CORE.md))
-3. **Solana Deploy Loop** — guided installers, wallet policy, `/new`, `anchor build/deploy` wrappers ([MILESTONE-3](docs/roadmap/milestones/MILESTONE-3_SOLANA_DEPLOY_LOOP.md))
-4. **Coding Workflow & Controls** — file intelligence, patch pipeline, command runner, context builder, tool policies ([MILESTONE-4](docs/roadmap/milestones/MILESTONE-4_CODING_WORKFLOW.md))
-5. **Knowledge Hub & Prompts** — curated Solana docs, embeddings, `/kb search`, system prompts ([MILESTONE-5](docs/roadmap/milestones/MILESTONE-5_KNOWLEDGE_PROMPTS.md))
-6. **Demo Polish & Packaging** — UX polish, tests/coverage, packaging, demo collateral, web search spike ([MILESTONE-6](docs/roadmap/milestones/MILESTONE-6_DEMO_POLISH.md))
+| 🧠 | **Intelligence** | AI-assisted planning + human control; no black boxes |
+|---|---|---|
+| ⚡ | **Speed** | Deploy working dApps in seconds, not days |
+| 🔒 | **Security** | Encrypted wallet storage, audited tool calls, transparent policies |
+| 🌐 | **Open** | Open-source, community-driven, built on DePIN principles |
 
-## Codebase Context Strategy
-- Each SolCoder launch creates a fresh session with its own transcript and context cache. You can resume a prior session by passing `--session <id>`, but context is always rebuilt on demand.
-- Before every LLM turn, the agent assembles an ephemeral bundle: directory tree snapshot, relevant file excerpts (including any `@filename` mentions), git status/diffs, and recent conversation snippets.
-- No remote vector database is used; context lives in memory for the active session and is discarded when SolCoder exits (apart from lightweight session metadata for resume/debug). Optional local embeddings (`knowledge/index.faiss`) stay on disk for faster knowledge search. Use `solcoder --dump-session <id>` to export the retained transcript when needed.
-- Tool invocations respect allow/confirm/deny rules from your config: whitelisted tools run silently, blacklisted tools are blocked, and anything else asks for confirmation. All calls are logged (redacted) to `<project>/.solcoder/logs/` for auditing.
-- Knowledge snippets pulled from `knowledge/` are appended to the context when relevant, giving the agent fast access to Solana best practices without network calls. When the embedding index is present, `/kb search` blends semantic and keyword ranking.
-- This mirrors Codex CLI’s transient indexing approach: fast, scoped, and safe—without background services or long-lived embeddings. Web search and external API fetches are out of scope for the MVP; see `docs/roadmap/todo/TASK-3.7_WEB_SEARCH_SPIKE.md` for future exploration.
+---
 
-## Support & Feedback
-Feature proposals, bug reports, and demo feedback are welcome via issues and discussions. For wallet or deployment problems, include your CLI output with sensitive secrets redacted.
+## 🔑 **Core Features**
+
+### 🤖 **Conversational Agent Loop**
+Describe your dApp idea in plain English. SolCoder's agent orchestrates code generation, testing, and deployment through a structured loop—no slash commands required (but they're there if you need determinism).
+
+### 💳 **Built-In Wallet**
+Generate or restore Solana keypairs. SolCoder encrypts them locally (PBKDF2 + AES-GCM), tracks your balance in real-time, and enforces session spend caps so you never overspend on gas.
+
+### 📦 **Reusable Templates**
+Clone from production-ready blueprints (Counter, NFT Mint) and customize on the fly. Each template includes client stubs, tests, and README scaffolds.
+
+### 📚 **Solana Knowledge Base**
+Embedded summaries of Anchor macros, SPL token standards, cryptography tips, and runtime notes. Local embeddings (FAISS) enable semantic search—no external calls, pure offline mode.
+
+### ⚙️ **Hands-Free Environment Setup**
+Missing Rust? Solana CLI? Anchor? SolCoder detects gaps and walks you through guided installers. One command launches a complete dev environment.
+
+### 🎛️ **Flexible Control**
+Choose your mode: **Assistive** (full agentic autonomy), **Guided** (confirm before each tool), or **Manual** (slash commands only). Toggle at runtime via `/settings mode`.
+
+### 🔐 **Config Layering & Audit Trail**
+- **Global defaults** in `~/.solcoder/config.toml`
+- **Project overrides** in `.solcoder/config.toml`
+- **CLI flags** override everything
+- Every tool invocation logged for transparency
+
+---
+
+## 🚀 **Quick Start**
+
+### Prerequisites
+- **Python 3.11+**, **Node.js**, **Rust**, **Solana CLI**, **Anchor**
+
+### Installation
+```bash
+# Clone & install
+git clone https://github.com/yourusername/SolCoder.git
+cd SolCoder
+poetry install
+
+# Launch the agent
+poetry run solcoder
+```
+
+### Your First Project (2 min walkthrough)
+
+1. **LLM Setup** — Enter your OpenAI/Anthropic API key (encrypted, asked once)
+2. **Wallet Wizard** — Create a new keypair or restore from mnemonic
+3. **Describe Your dApp** — e.g., *"Build a token swap contract with 2% fee. I want to deploy to devnet."*
+4. **Watch It Build** — SolCoder scaffolds → builds → deploys → shows you the explorer link
+5. **Resume Anytime** — `poetry run solcoder --session <id>` picks up your context
+
+### Example Commands
+
+```bash
+# Resume previous session
+poetry run solcoder --session abc123def456
+
+# Force fresh context
+poetry run solcoder --new-session
+
+# Scaffold a template project
+poetry run solcoder --template counter ./my-counter --program my_counter
+
+# Test LLM connectivity
+poetry run solcoder --dry-run-llm
+
+# Offline mode (demos, no network)
+poetry run solcoder --offline-mode
+```
+
+---
+
+## 🎮 **Interactive Commands**
+
+Once inside SolCoder's REPL, you have access to powerful slash commands:
+
+| Command | Purpose |
+|---------|---------|
+| `/wallet status` | Check balance & lock state |
+| `/wallet create` | Generate new keypair |
+| `/wallet unlock` | Decrypt wallet for spending |
+| `/wallet phrase` | View recovery mnemonic |
+| `/template <name>` | Scaffold from blueprint |
+| `/kb search <query>` | Search knowledge base |
+| `/settings mode <level>` | Toggle assistive/guided/manual |
+| `/settings spend <sol>` | Set session budget |
+| `/toolkits list` | Show available automation |
+| `/deploy` | Manual deploy to devnet |
+| `/config set` | Rotate LLM credentials |
+
+---
+
+## 📋 **Architecture at a Glance**
+
+```
+┌─────────────────────────────────────────────┐
+│        CLI (Prompt Toolkit REPL)            │  🖥️ Your Interface
+├─────────────────────────────────────────────┤
+│   Agent Loop + Tool Registry (JSON Schema)  │  🧠 Orchestration
+├─────────────────────────────────────────────┤
+│  Wallet | RPC | Build | Deploy | Knowledge │  ⛓️  Solana Layer
+└─────────────────────────────────────────────┘
+```
+
+**Each layer is independent:**
+- Add new tools without touching CLI
+- Swap LLM providers (OpenAI → Anthropic) with one flag
+- Run offline or live seamlessly
+
+---
+
+## 🛠️ **Development & Testing**
+
+### Run Tests
+```bash
+poetry run pytest                    # Full suite
+poetry run pytest -m "not slow"      # Fast feedback
+poetry run pytest --cov=solcoder     # Coverage report
+```
+
+### Code Quality
+```bash
+poetry run ruff check src tests      # Linting
+poetry run black src tests           # Formatting
+poetry run black src tests --check   # CI mode
+```
+
+### LLM Configuration
+```bash
+# Override provider & model
+poetry run solcoder --llm-provider openai --llm-model gpt-5-codex
+
+# Control reasoning effort
+poetry run solcoder --llm-reasoning high
+
+# Smoke-test connectivity
+poetry run solcoder --dry-run-llm
+```
+
+### Knowledge Base
+```bash
+# Rebuild embeddings after editing docs
+poetry run python scripts/build_kb_index.py
+```
+
+---
+
+## 📁 **Project Layout**
+
+```
+SolCoder/
+├── src/solcoder/
+│   ├── cli/          # Prompt Toolkit REPL, commands, branding
+│   ├── core/         # Agent loop, tool registry, config, session
+│   ├── solana/       # Wallet, RPC, build/deploy adapters
+│   └── session/      # Session persistence
+├── templates/        # Blueprint projects (Counter, NFT Mint)
+├── tests/            # Unit, integration, e2e fixtures
+├── docs/             # PRD, roadmap, milestones, WBS
+├── knowledge/        # Curated Solana docs & embeddings
+└── poetry.lock       # Dependency snapshot
+```
+
+---
+
+## 🌟 **What's Next: Beyond Hackathon**
+
+### **Phase 2: DePIN-Powered Inference**
+
+After shipping the hackathon MVP, SolCoder will integrate with decentralized inference networks on Solana:
+
+- **Distributed LLM calls** powered by DePIN platforms (Gradient, Gensyn, etc.)
+- **No single point of failure** — redundancy built in
+- **Transparent pricing** — pay what you use, only when deployed
+
+```
+User ─► SolCoder ─► DePIN Router ─► [Node 1, Node 2, Node 3] ─► Result
+                                      (Solana-settled)
+```
+
+### **Phase 3: SolCoder Token (SCR)**
+
+A native token enabling:
+
+- **Pay-for-inference** — Use SCR to execute agentic jobs
+- **Staking rewards** — Run a node, earn SCR from inference traffic
+- **Governance** — Vote on template additions, feature priorities
+- **Community fund** — Allocate SCR to developer grants & bounties
+
+**Why token?** Aligns incentives. The more builders use SolCoder, the more nodes run, the better inference becomes.
+
+### **Phase 4: Agentic Contribution Network**
+
+The boldest vision: **a network of AI agents extending the Solana ecosystem**.
+
+**How it works:**
+
+1. **Deploy Your Node** — Run SolCoder in "network mode"; lock SCR as collateral
+2. **Accept Contribution Tasks** — Agents propose:
+   - 🐛 Find & fix bugs in popular Solana crates
+   - 🔧 Extend Anchor macro library
+   - 📚 Improve documentation
+   - 🧪 Write test coverage
+   - 🎯 Design new SPL standards
+
+3. **Earn Reputation & Rewards**
+   - Validated contributions earn SCR tokens
+   - Build public developer reputation on-chain
+   - Top contributors get featured in ecosystem
+
+4. **Solana Grows Faster**
+   - Hundreds of AI agents working 24/7 on ecosystem improvements
+   - Bugs caught earlier, features shipped faster
+   - Community-approved, cryptographically signed changes
+
+**Example flow:**
+```
+Node Operator ─┐
+               ├─► Agent Network ─► "Audit anchor-lang for missing tests"
+Developer     ─┘                     └─► Automated PR + validation
+                                        └─► SCR reward if accepted
+```
+
+This is **Solana's distributed workforce**. Not replacing humans—amplifying them.
+
+---
+
+## 🤝 **Contributing**
+
+We welcome contributions from builders of all levels. Here's how:
+
+### **Ideas & Feedback**
+- [**Discussions**](https://github.com/yourusername/SolCoder/discussions) — Share feature requests, ask questions
+- [**Issues**](https://github.com/yourusername/SolCoder/issues) — Report bugs or propose enhancements
+
+### **Code Contributions**
+
+1. **Fork & clone** the repository
+2. **Create a feature branch** — `git checkout -b feat/my-feature`
+3. **Follow our style guide** — See `CLAUDE.md` for architecture & coding standards
+4. **Write tests** — Target ≥80% coverage in `src/solcoder/core` and `src/solcoder/solana`
+5. **Run checks** — Ensure `ruff`, `black`, and `pytest` pass
+6. **Commit & push** — Use Conventional Commits (`feat:`, `fix:`, `chore:`)
+7. **Open a PR** — Link relevant roadmap tasks & explain the "why"
+
+### **Areas We Need Help**
+
+- 🎨 **UI/UX** — Improve REPL styling & error messages
+- 🧪 **Testing** — Expand e2e coverage for edge cases
+- 📚 **Documentation** — Add tutorials & guides for common patterns
+- 🔗 **Templates** — Submit new Anchor blueprint projects
+- 🌍 **Localization** — Translate docs & error messages
+
+### **Development Commands**
+
+```bash
+# Setup
+poetry install
+poetry run solcoder --dry-run-llm
+
+# Before committing
+poetry run ruff check src tests
+poetry run black src tests
+poetry run pytest --maxfail=1
+
+# Code review
+poetry run solcoder --dump-session <id>  # Export session for analysis
+```
+
+See **[AGENTS.md](./AGENTS.md)** for detailed contributor guidelines.
+
+---
+
+## 📊 **Roadmap**
+
+### ✅ **Hackathon MVP (Live Now)**
+- [x] CLI agent loop with JSON schema contracts
+- [x] Built-in wallet (PBKDF2 + AES-GCM encryption)
+- [x] Anchor build & deploy to devnet
+- [x] Counter & NFT Mint templates
+- [x] Solana knowledge base with embeddings
+- [x] Session persistence & resumption
+- [x] Config layering (global/project/CLI)
+
+### 🎯 **Phase 2 (Q1 2025)**
+- [ ] DePIN inference network integration
+- [ ] Multi-provider LLM routing
+- [ ] Web search spike for knowledge augmentation
+- [ ] Advanced patch pipeline & safety checks
+
+### 🚀 **Phase 3 (Q2 2025)**
+- [ ] SolCoder token (SCR) on-chain
+- [ ] Staking & reward distribution
+- [ ] Governance voting system
+
+### 🌌 **Phase 4 (Q3 2025+)**
+- [ ] Agentic contribution network
+- [ ] On-chain reputation system
+- [ ] Automated ecosystem improvement workflows
+
+See `docs/roadmap/` for detailed milestones, tasks, and in-progress work.
+
+---
+
+## 📖 **Documentation**
+
+- **[README](./README.md)** — This file; high-level overview
+- **[CLAUDE.md](./CLAUDE.md)** — Architecture deep-dive for developers
+- **[AGENTS.md](./AGENTS.md)** — Contributor guidelines & style standards
+- **[PRD](./docs/PRD.md)** — Product requirements & vision
+- **[WBS](./docs/WBS.md)** — Work breakdown structure
+- **[Milestones](./docs/roadmap/milestones/)** — Detailed phase plans
+
+---
+
+## 🆘 **Support & Feedback**
+
+- 💬 **[GitHub Discussions](https://github.com/yourusername/SolCoder/discussions)** — Ask questions, share ideas
+- 🐛 **[GitHub Issues](https://github.com/yourusername/SolCoder/issues)** — Report bugs or suggest features
+- 🔐 **Security** — For wallet or deployment issues, include CLI output (with secrets redacted)
+
+---
+
+## 📜 **License**
+
+SolCoder is **open-source** under the [MIT License](./LICENSE). Use it freely, modify it, build on it.
+
+---
+
+## 🙏 **Acknowledgments**
+
+Built with love by the SolCoder team and inspired by the Solana community. Special thanks to:
+- **Anchor team** for the excellent Solana framework
+- **Solana validators & DePIN pioneers** for infrastructure
+- **Hackathon judges & mentors** for feedback & support
+- **You**, for believing in the vision
+
+---
+
+<div align="center">
+
+### ⚡ **Ready to Build?**
+
+```bash
+poetry run solcoder
+```
+
+**Transform your Solana ideas into deployed dApps at light speed.**
+
+🚀 **SolCoder** — *Where AI meets blockchain.*
+
+</div>
+
+---
+
+<div align="center">
+
+**Made with ❤️ for the Solana ecosystem** | [Follow us](https://twitter.com/yourusername) | [Star ⭐ us on GitHub](https://github.com/yourusername/SolCoder)
+
+</div>
