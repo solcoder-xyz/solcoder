@@ -18,6 +18,7 @@ Provide automated installers triggered by `/env install` that fetch and configur
 - `/env install <tool>` and `/env install all` commands integrated with Rich progress UI.
 - Post-install verification reusing diagnostics to confirm tools on PATH.
 - Documentation updates detailing installer behavior and manual fallback steps.
+- Bootstrap onboarding hook: on first launch, detect missing Solana environment tooling and prompt the user to run the relevant installer(s) before dropping into the REPL.
 
 ## Key Steps
 1. Define installer interface (download, install, verify) with dry-run capability.
