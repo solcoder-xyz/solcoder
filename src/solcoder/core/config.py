@@ -45,6 +45,10 @@ class SolCoderConfig(BaseModel):
     auto_airdrop: bool = True
     auto_airdrop_threshold: float = 0.5
     auto_airdrop_cooldown_secs: int = 30
+    # New names for auto-airdrop policy (preferred going forward)
+    auto_airdrop_min_balance: float = 0.5
+    auto_airdrop_amount: float = 1.0
+    airdrop_cooldown_secs: int = 30
     telemetry: bool = False
     llm_provider: str = "openai"
     llm_base_url: str = "https://api.openai.com/v1"

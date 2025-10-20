@@ -64,6 +64,8 @@ from solcoder.core.tools.todo import todo_toolkit
 from solcoder.core.wallet_state import fetch_balance, update_wallet_metadata
 from solcoder.session import SessionContext, SessionManager
 from solcoder.solana import SolanaRPCClient, WalletError, WalletManager, WalletStatus
+from datetime import UTC, datetime
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -383,6 +385,11 @@ class CLIApp:
             logger.debug("Failed to dispatch tool-requested command", exc_info=True)
 
         self.context_manager.compact_history_if_needed()
+        # Evaluate auto-airdrop policy after each command
+        try:
+            self._maybe_auto_airdrop()
+        except Exception:
+            logger.debug("Auto-airdrop check failed", exc_info=True)
         self._persist()
         self._refresh_status_bar()
         return response
@@ -901,6 +908,104 @@ class CLIApp:
                 sys.__stdout__.flush()
         else:
             self._console.print(*objects, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Wallet auto-airdrop helper
+    # ------------------------------------------------------------------
+    def _maybe_auto_airdrop(self) -> None:
+        cfg_ctx = self.config_context
+        if cfg_ctx is None:
+            return
+        cfg = cfg_ctx.config
+        # Only on devnet/testnet
+        network = getattr(cfg, "network", "unknown").lower()
+        if network not in {"devnet", "testnet"}:
+            return
+        status = self.wallet_manager.status()
+        if not status.exists or not status.public_key:
+            return
+        # Determine thresholds
+        min_balance = getattr(cfg, "auto_airdrop_min_balance", None)
+        if min_balance is None:
+            min_balance = getattr(cfg, "auto_airdrop_threshold", 0.0)
+        amount = getattr(cfg, "auto_airdrop_amount", 1.0)
+        cooldown = getattr(cfg, "airdrop_cooldown_secs", None)
+        if cooldown is None:
+            cooldown = getattr(cfg, "auto_airdrop_cooldown_secs", 30)
+        auto = bool(getattr(cfg, "auto_airdrop", True))
+        # Current balance
+        balance = self._fetch_balance(status.public_key)
+        if balance is None or balance >= float(min_balance or 0.0):
+            return
+        # Cooldown check
+        last = getattr(self.session_context.metadata, "last_airdrop_at", None)
+        if last is not None:
+            elapsed = (datetime.now(UTC) - last).total_seconds()
+            if elapsed < float(cooldown or 0):
+                return
+        # Prompt or auto-execute
+        should_airdrop = auto
+        if not auto:
+            try:
+                answer = self._prompt_text(
+                    f"Balance low ({balance:.3f} SOL). Request {amount:.3f} SOL airdrop now? (y/N)"
+                ).strip().lower()
+            except Exception:
+                answer = "n"
+            should_airdrop = answer in {"y", "yes"}
+        if not should_airdrop:
+            return
+        # Execute airdrop with retry/backoff and poll for update
+        rpc_url = getattr(cfg, "rpc_url", "https://api.devnet.solana.com")
+        rpc_client = self.rpc_client or SolanaRPCClient(endpoint=rpc_url)
+        if self.rpc_client is None:
+            self.rpc_client = rpc_client
+        address = status.public_key
+        before = balance
+        with self.console.status(f"Auto-airdrop {amount:.3f} SOL…", spinner="dots") as status_indicator:
+            attempts = 3
+            delay = 2.0
+            sig = None
+            last_err = None
+            for i in range(attempts):
+                try:
+                    sig = rpc_client.request_airdrop(address, amount)
+                    last_err = None
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    last_err = exc
+                    if i < attempts - 1:
+                        status_indicator.update("Faucet busy; retrying shortly…")
+                        time.sleep(delay)
+                        delay *= 1.5
+                        continue
+            if sig is None:
+                self.log_event("wallet", f"Auto-airdrop failed: {last_err}", severity="warning")
+                return
+            deadline = time.time() + 30.0
+            final_balance = before
+            while time.time() < deadline:
+                time.sleep(1.0)
+                try:
+                    current = rpc_client.get_balance(address)
+                except Exception:
+                    continue
+                final_balance = current
+                if before is None or current > (before or 0.0):
+                    break
+                status_indicator.update("Waiting for airdrop confirmation…")
+        # Update metadata
+        status = self.wallet_manager.status()
+        self._update_wallet_metadata(status, balance=final_balance)
+        try:
+            self.session_context.metadata.last_airdrop_at = datetime.now(UTC)
+            self.session_manager.save(self.session_context)
+        except Exception:
+            pass
+        if final_balance is not None and (before is None or final_balance > (before or 0.0)):
+            self.log_event("wallet", f"Auto-airdrop received ({amount:.3f} SOL)")
+        else:
+            self.log_event("wallet", "Auto-airdrop submitted; balance pending", severity="info")
 
     def _load_todo_state(self) -> None:
         if self.session_manager is None:
