@@ -15,7 +15,7 @@ Deliver the end-to-end Solana deploy experience so users can scaffold a template
 ## Suggested Task Order
 1. Task 2.1 — Guided Environment Installers
 2. Task 2.2 — Wallet Balance, Airdrop & Spend Policy
-   - Task 2.2a — DAAP Interaction (Anchor‑First)
+   - Task 2.2a — Program Interaction (Anchor‑First)
 3. Task 2.3 — `/new` Template Pipeline
 4. Task 2.4 — Build & Deploy Adapters
 
