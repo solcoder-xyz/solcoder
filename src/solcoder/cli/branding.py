@@ -252,7 +252,7 @@ def create_todo_panel(tasks: list[dict[str, Any]]) -> RenderableType:
 
     # Count lifecycle breakdown
     active = sum(1 for t in tasks if t.get("status") == "in_progress")
-    pending = sum(1 for t in tasks if t.get("status") == "pending")
+    pending = sum(1 for t in tasks if t.get("status") in {"pending", "todo"})
     completed = sum(1 for t in tasks if t.get("status") == "done")
     total = len(tasks)
     progress_pct = (completed / total * 100) if total > 0 else 0
@@ -273,7 +273,7 @@ def create_todo_panel(tasks: list[dict[str, Any]]) -> RenderableType:
     table.add_column("Task", style="solcoder.text.primary")
 
     for task in tasks:
-        status = task.get("status", "pending")
+        status = task.get("status", "todo")
         task_id = task.get("id", "")
         title = task.get("title", "")
         description = task.get("description")

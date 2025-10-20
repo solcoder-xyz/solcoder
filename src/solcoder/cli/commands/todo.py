@@ -20,7 +20,7 @@ USAGE = (
     "  /todo confirm"
 )
 
-ALLOWED_STATUS = {"pending", "in_progress", "done"}
+ALLOWED_STATUS = {"todo", "pending", "in_progress", "done"}
 
 
 def register(app: CLIApp, router: CommandRouter) -> None:
@@ -189,6 +189,8 @@ def _extract_updates(args: list[str]) -> dict[str, str | None]:
         status = updates["status"].strip().lower()
         if status not in ALLOWED_STATUS:
             raise ValueError(f"Invalid status '{status}'. Allowed values: {', '.join(sorted(ALLOWED_STATUS))}.")
+        if status == "pending":
+            status = "todo"
         updates["status"] = status
     return {key: value for key, value in updates.items() if value is not None}
 

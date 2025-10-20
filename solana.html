@@ -153,10 +153,93 @@
         padding: 1.5rem;
       }
     }
-  </style>
+      /* BEGIN:BANNER_STYLES */
+    .hero-banner {
+      margin: 0 auto 2rem;
+      max-width: 1080px;
+      padding: 1.5rem 2rem;
+      border-radius: 20px;
+      background: linear-gradient(120deg, rgba(20, 241, 149, 0.12), rgba(0, 163, 255, 0.18));
+      border: 1px solid rgba(20, 241, 149, 0.35);
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1.5rem;
+      box-shadow: 0 32px 68px -40px rgba(20, 241, 149, 0.65);
+    }
+
+    .banner-kicker {
+      font-size: 0.85rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 0;
+      flex: 1 1 100%;
+    }
+
+    .banner-body {
+      flex: 1 1 360px;
+    }
+
+    .hero-banner h2 {
+      margin: 0 0 0.4rem;
+      font-size: clamp(1.75rem, 4vw, 2.4rem);
+    }
+
+    .hero-banner p {
+      margin: 0;
+      color: var(--text-muted);
+    }
+
+    .banner-cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.9rem 1.8rem;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #06101a;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      box-shadow: 0 18px 42px -24px rgba(20, 241, 149, 0.8);
+      flex: 0 0 auto;
+    }
+
+    .banner-cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 20px 48px -24px rgba(153, 69, 255, 0.75);
+    }
+
+    @media (max-width: 640px) {
+      .hero-banner {
+        padding: 1.4rem 1.5rem;
+      }
+
+      .banner-cta {
+        width: 100%;
+      }
+    }
+    /* END:BANNER_STYLES */
+</style>
 </head>
 <body>
-  <header>
+    <!-- BEGIN:BANNER -->
+  <section class="hero-banner">
+    <p class="banner-kicker">Community Spotlight</p>
+    <div class="banner-body">
+      <h2>Solana Summer Hackathon</h2>
+      <p>
+        Build lightning-fast dApps, connect with mentors, and compete for grants powering the next wave of Web3 experiences.
+      </p>
+    </div>
+    <a class="banner-cta" href="https://solana.com/hackathon" target="_blank" rel="noopener">
+      Register now →
+    </a>
+  </section>
+  <!-- END:BANNER -->
+<header>
     <h1><span>Solana</span> Network</h1>
     <p class="lead">
       Solana is a high-performance blockchain designed for massively scalable, low-cost applications. Built with
@@ -229,6 +312,43 @@
     </section>
 
     <section>
+      <h2>Rust on Solana</h2>
+      <p>
+        Rust is the primary language for Solana programs, blending low-level control with compile-time guarantees
+        that prevent whole classes of memory and concurrency bugs before deployment.
+      </p>
+      <ul>
+        <li><strong>Solana Program Library foundations:</strong> Core SPL components and reference DeFi protocols are
+          implemented in Rust, offering audited examples to learn from and reuse.</li>
+        <li><strong>Deterministic BPF output:</strong> The Rust LLVM toolchain targets Solana's Berkeley Packet Filter
+          runtime, producing reproducible builds that minimize compute costs on-chain.</li>
+        <li><strong>Developer ergonomics:</strong> Macros, Anchor, and testing crates such as
+          <code>solana-program-test</code> streamline account serialization, client generation, and integration tests
+          with type safety.</li>
+        <li><strong>Interoperable tooling:</strong> Cargo workspaces, continuous integration pipelines, and linting
+          suites translate directly from the broader Rust ecosystem to Solana development.
+      </ul>
+      <p style="margin-top:1rem;">
+        Explore the <a href="https://docs.solana.com/developing/programming-model/overview" target="_blank" rel="noopener">Solana programming model docs</a> for Rust-specific guidance and best practices.
+      </p>
+    </section>
+
+    <section>
+      <h2>Solana DevTool</h2>
+      <p>
+        The <code>solana devtool</code> command streamlines local development by bundling a test validator, program deploy helpers, and transaction inspectors into a single workflow.
+      </p>
+      <ul>
+        <li><strong>Rapid sandboxes:</strong> Spin up a disposable local cluster, airdrop SOL, and reset state with a single command.</li>
+        <li><strong>Program lifecycle:</strong> Build, deploy, and invoke programs through guided prompts that surface required accounts and IDs.</li>
+        <li><strong>Actionable diagnostics:</strong> Capture logs, profile compute units, and re-run transactions with debugger-friendly output.</li>
+      </ul>
+      <p style="margin-top:1rem;">
+        Install it alongside the Solana CLI and view usage tips in the <a href="https://docs.solana.com/cli" target="_blank" rel="noopener">official CLI documentation</a>.
+      </p>
+    </section>
+
+    <section>
       <h2>Popular Use Cases</h2>
       <div class="cards">
         <article class="card">
@@ -278,6 +398,49 @@
       </p>
     </section>
 
+
+    <section>
+      <h2>Testing Solana dApps</h2>
+      <p>
+        Robust testing pipelines keep Solana dApps reliable across rapid program iterations and wallet integrations.
+        Teams combine local validators, devnet deployments, and end-to-end automation to surface regressions before
+        shipping to production.
+      </p>
+      <ul>
+        <li><strong>Program unit tests:</strong> Use <code>solana-program-test</code> or Anchor's workspace to simulate
+          accounts, execute instructions, and validate state transitions deterministically.</li>
+        <li><strong>Local integration loops:</strong> Spin up <code>solana-test-validator</code> (or Anchor&apos;s
+          <code>anchor test</code>) to run transactions against a disposable cluster with custom genesis configurations
+          and airdropped tokens.</li>
+        <li><strong>Client and UI validation:</strong> Mock wallet adapters, RPC responses, and error states in Jest,
+          Cypress, or Playwright suites to ensure frontends handle re-signing, rate limits, and fallback providers.</li>
+        <li><strong>Continuous delivery guards:</strong> Automate builds with CI runners that lint programs, execute
+          unit/integration tests, and deploy ephemeral previews to devnet before manual review.</li>
+      </ul>
+      <p style="margin-top:1rem;">
+        Learn more in the <a href="https://docs.solana.com/developing/test-validator" target="_blank" rel="noopener">test validator guide</a> and <a href="https://book.anchor-lang.com/chapter_5/testing.html" target="_blank" rel="noopener">Anchor testing documentation</a>.
+      </p>
+    </section>
+
+    <section>
+      <h2>Wallet Security & Cold Storage</h2>
+      <p>
+        Cold storage keeps the private keys for high-value SOL or SPL token holdings isolated from the internet, limiting
+        exposure to malware and phishing attacks. It is the default posture for treasuries, long-term investors, and
+        protocols safeguarding community funds.
+      </p>
+      <ul>
+        <li><strong>Hardware devices:</strong> Use Ledger, Keystone, or other Solana-capable signers with firmware updated through the vendor's secure channels, and always confirm recipient addresses on the device screen before approving.</li>
+        <li><strong>Air-gapped signing:</strong> Generate keypairs with <code>solana-keygen</code> on an offline machine, sign transactions with <code>--sign-only</code>, and transfer the signed payload via QR code, USB drive, or NFC for broadcast from an online relay.</li>
+        <li><strong>Resilient backups:</strong> Record the seed phrase in tamper-resistant media; consider redundant copies stored in separate locations or Shamir secret sharing to balance accessibility and safety.</li>
+        <li><strong>Operational segmentation:</strong> Keep a lightweight hot wallet for frequent activity while gating treasury moves behind multisig policies, time locks, or custodial approvals that require hardware confirmation.</li>
+      </ul>
+      <p style="margin-top:1rem;">
+        Periodically test recovery procedures and monitor vendor advisories so offline storage remains compatible with
+        Solana tooling as the ecosystem evolves.
+      </p>
+    </section>
+
     <section>
       <h2>Getting Started</h2>
       <ol>
@@ -287,7 +450,22 @@
         <li>Stay updated via the <a href="https://solana.com/developers" target="_blank" rel="noopener">developer portal</a> and community resources.</li>
       </ol>
     </section>
-  </main>
+      <section>
+      <h2>With Jokes</h2>
+      <p>
+        Even serious blockchains deserve a laugh. Here are a few Solana-themed jokes to keep your validator humming.
+      </p>
+      <ul>
+        <li><strong>Node walks into a bar:</strong> Bartender says, "We only serve low-latency drinks." Node replies, "Perfect, I settle tabs in 400 milliseconds."</li>
+        <li><strong>Gas fees?</strong> Solana users call that "pocket lint." It's the only chain where you can tip your coffee and your smart contract at the same time.</li>
+        <li><strong>Validator pickup line:</strong> "Are you a TPU pipeline? Because my heart just reached finality in record time."</li>
+      </ul>
+      <p style="margin-top:1rem; color: var(--text-muted); font-size:0.95rem;">
+        Share these with your validator buddies—just make sure they don't laugh so hard they drop consensus.
+      </p>
+    </section>
+
+</main>
   <footer>
     Built to highlight why Solana is a leading platform for next-generation decentralized applications.
   </footer>

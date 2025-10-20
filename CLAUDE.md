@@ -398,9 +398,11 @@ TODO manager coordinates with agent loop:
 # → Displays TODO list to user
 # → Sets show_todo_list=true in tool result payloads
 
-# Agent can update via tools
-todo_add_task(title="new task")
-todo_update_task(id="task_123", status="done")
+# Agent updates entire checklist in one call
+todo_update_list(tasks=[
+    {"name": "Write tests", "status": "in_progress"},
+    {"name": "Ship docs", "status": "todo"}
+])
 
 # Loop enforces: if TODO items exist and not acknowledged, 
 # agent must reply with "complete" or use tools first
