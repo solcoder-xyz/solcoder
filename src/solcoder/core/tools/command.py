@@ -58,8 +58,10 @@ def _command_handler(payload: dict[str, Any]) -> ToolResult:
     if stderr:
         stderr_display = _truncate_preview(stderr)
 
+    command_display = _truncate_preview(command)
+
     content_lines = [
-        f"$ {command}",
+        f"$ {command_display}",
         f"(exit code {completed.returncode})",
         "",
         stdout_display,
