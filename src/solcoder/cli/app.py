@@ -30,13 +30,19 @@ from solcoder.cli.status_bar import StatusBar
 from solcoder.cli.stub_llm import StubLLM
 from solcoder.cli.types import CommandResponse, CommandRouter, LLMBackend
 from solcoder.cli.wallet_prompts import prompt_secret, prompt_text
-from solcoder.core import ConfigContext, ConfigManager
+from solcoder.core import ConfigContext, ConfigManager, collect_environment_diagnostics
 from solcoder.core.agent_loop import (
     DEFAULT_AGENT_MAX_ITERATIONS,
     AgentLoopContext,
     run_agent_loop,
 )
 from solcoder.core.context import ContextManager
+from solcoder.core.installers import (
+    InstallerError,
+    detect_missing_tools,
+    install_tool,
+    installer_display_name,
+)
 from solcoder.core.llm import LLMError
 from solcoder.core.logs import LogBuffer, LogEntry
 from solcoder.core.todo import TodoManager
@@ -262,6 +268,7 @@ class CLIApp:
     # ------------------------------------------------------------------
     def run(self) -> None:
         """Start the interactive REPL."""
+        self._handle_environment_bootstrap()
         self._render_banner()
         session_id = self.session_context.metadata.session_id
         metadata = self.session_context.metadata
@@ -347,6 +354,72 @@ class CLIApp:
         self._persist()
         self._refresh_status_bar()
         return response
+
+    def _handle_environment_bootstrap(self) -> None:
+        try:
+            diagnostics = collect_environment_diagnostics()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Environment diagnostics failed during bootstrap: %s", exc)
+            return
+
+        missing = detect_missing_tools(diagnostics, only_required=True)
+        if not missing:
+            return
+
+        missing_names = ", ".join(installer_display_name(tool) for tool in missing)
+        panel_text = Text.from_markup(
+            "\n".join(
+                [
+                    "[#FACC15]Environment Setup[/]",
+                    "[#94A3B8]The following Solana tooling is missing:[/]",
+                    f"[#F97316]{missing_names}[/]",
+                    "",
+                    "Install them now? (y/N)",
+                ]
+            )
+        )
+        self.console.print(
+            Panel(
+                panel_text,
+                title="[bold #38BDF8]Environment Installers[/]",
+                border_style="#FACC15",
+                padding=(1, 2),
+            )
+        )
+
+        answer = prompt_text(self.session, "Install missing tools now? [y/N]").strip().lower()
+        if answer not in {"y", "yes"}:
+            self.console.print(
+                "[#94A3B8]Skipping automated installs. You can run `/env install` later.[/]"
+            )
+            return
+
+        for tool in missing:
+            name = installer_display_name(tool)
+            self.console.print(f"[#38BDF8]Installing {name}...[/]")
+            try:
+                result = install_tool(tool, console=self.console)
+            except InstallerError as exc:  # pragma: no cover - interactive failure
+                self.console.print(f"[#F97316]Failed to install {name}: {exc}[/]")
+                self.log_event("install", f"{name} install error: {exc}", severity="error")
+                continue
+
+            if result.success and result.verification_passed:
+                self.console.print(f"[#14F195]Installed {name} successfully.[/]")
+                self.log_event("install", f"{name} installed", severity="info")
+            else:
+                error_detail = result.error or "verification failed"
+                self.console.print(f"[#F97316]{name} installation incomplete: {error_detail}[/]")
+                self.log_event("install", f"{name} install incomplete: {error_detail}", severity="warning")
+
+        refreshed = collect_environment_diagnostics()
+        remaining = detect_missing_tools(refreshed, only_required=True)
+        if remaining:
+            remaining_names = ", ".join(installer_display_name(tool) for tool in remaining)
+            self.console.print(
+                f"[#FACC15]Setup note:[/] Still missing: {remaining_names}. "
+                "Run `/env install <tool>` when ready."
+            )
 
     def log_event(
         self, category: str, message: str, *, severity: str = "info"

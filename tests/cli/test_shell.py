@@ -16,6 +16,7 @@ from solcoder.cli.stub_llm import StubLLM
 from solcoder.cli.commands import env as env_commands
 from solcoder.core.config import ConfigContext, ConfigManager, SolCoderConfig
 from solcoder.core.env_diag import DiagnosticResult
+from solcoder.core.installers import InstallerResult
 from solcoder.core.llm import LLMResponse
 from solcoder.core.tool_registry import Tool, ToolResult, build_default_registry
 from solcoder.session import SessionManager
@@ -946,7 +947,108 @@ def test_env_diag_usage(console: Console, session_bundle: tuple[SessionManager, 
 
     response = app.handle_line("/env")
 
-    assert any("Usage: /env diag" in message for _, message in response.messages)
+    assert any("Usage: /env <diag|install>" in message for _, message in response.messages)
+
+
+def test_env_install_invokes_installer(
+    monkeypatch: pytest.MonkeyPatch,
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    calls: list[tuple[str, bool]] = []
+
+    def fake_install(tool: str, *, console=None, dry_run: bool = False, runner=None) -> InstallerResult:  # type: ignore[override]
+        calls.append((tool, dry_run))
+        return InstallerResult(
+            tool=tool,
+            display_name="Anchor CLI",
+            success=True,
+            verification_passed=True,
+            commands=("fake",),
+            logs=("ok",),
+        )
+
+    monkeypatch.setattr(env_commands, "install_tool", fake_install)
+
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    response = app.handle_line("/env install anchor")
+
+    assert calls == [("anchor", False)]
+    combined = "\n".join(message for _, message in response.messages)
+    assert "Anchor CLI" in combined
+
+
+def test_env_install_handles_unknown_tool(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    response = app.handle_line("/env install unknown")
+
+    assert any("Unknown installer" in message for _, message in response.messages)
+
+
+def test_bootstrap_prompts_for_missing_tools(
+    monkeypatch: pytest.MonkeyPatch,
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+
+    missing_sequence = [["solana"], []]
+
+    def fake_collect():
+        return []
+
+    def fake_detect(_diagnostics, *, only_required=True):
+        return missing_sequence.pop(0) if missing_sequence else []
+
+    records: list[str] = []
+
+    def fake_install(tool: str, **kwargs):  # type: ignore[override]
+        records.append(tool)
+        return InstallerResult(
+            tool=tool,
+            display_name="Solana CLI",
+            success=True,
+            verification_passed=True,
+            commands=("fake",),
+            logs=("installed",),
+        )
+
+    monkeypatch.setattr(cli_app_module, "collect_environment_diagnostics", fake_collect)
+    monkeypatch.setattr(cli_app_module, "detect_missing_tools", fake_detect)
+    monkeypatch.setattr(cli_app_module, "install_tool", fake_install)
+    monkeypatch.setattr(cli_app_module, "installer_display_name", lambda tool: "Solana CLI")
+    monkeypatch.setattr(cli_app_module, "prompt_text", lambda session, message: "y")
+
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    app._handle_environment_bootstrap()
+
+    assert records == ["solana"]
 
 
 def test_template_counter_command(

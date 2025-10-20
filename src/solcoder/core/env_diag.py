@@ -67,6 +67,24 @@ REQUIRED_TOOLS: tuple[ToolRequirement, ...] = (
         version_args=["--version"],
         remediation="Install npm by installing Node.js: https://nodejs.org/en/download",
     ),
+    ToolRequirement(
+        name="Yarn",
+        executable="yarn",
+        version_args=["--version"],
+        remediation="Enable Yarn via Corepack: `npm install -g corepack && corepack enable`.",
+    ),
+    ToolRequirement(
+        name="Python 3",
+        executable="python3",
+        version_args=["--version"],
+        remediation="Install Python 3 using your OS package manager or https://www.python.org/downloads/.",
+    ),
+    ToolRequirement(
+        name="pip",
+        executable="pip3",
+        version_args=["--version"],
+        remediation="Install pip with `python3 -m ensurepip --upgrade`.",
+    ),
 )
 
 
