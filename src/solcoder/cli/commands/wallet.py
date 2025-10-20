@@ -5,6 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from solcoder.core.qr import (
+    DataOverflowError,
+    QRUnavailableError,
+    format_qr_block,
+    render_qr_ascii,
+)
+
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
 from solcoder.solana import WalletError
 
@@ -21,6 +28,13 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             app.log_event("wallet", "Wallet manager unavailable", severity="error")
             return CommandResponse(messages=[("system", "Wallet manager unavailable in this session.")])
 
+        def _address_qr_block(address: str) -> str:
+            try:
+                qr_lines = render_qr_ascii(address).splitlines()
+            except (DataOverflowError, QRUnavailableError):
+                return "(QR unavailable for address)"
+            return format_qr_block(qr_lines)
+
         if not args or args[0].lower() == "status":
             status = manager.status()
             balance = app._fetch_balance(status.public_key)
@@ -30,11 +44,14 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 return CommandResponse(messages=[("system", "No wallet found. Run `/wallet create` to set one up.")])
             lock_state = "Unlocked" if status.is_unlocked else "Locked"
             balance_line = f"Balance: {balance:.3f} SOL" if balance is not None else "Balance: unavailable"
+            qr_block = _address_qr_block(status.public_key or "")
             message = "\n".join(
                 [
                     f"Wallet {lock_state}",
                     f"Address: {status.public_key} ({status.masked_address})",
                     balance_line,
+                    "Address QR:",
+                    qr_block,
                 ]
             )
             app.log_event("wallet", f"Status checked: {lock_state} ({status.masked_address})")
@@ -42,6 +59,41 @@ def register(app: CLIApp, router: CommandRouter) -> None:
 
         command, *rest = args
         command = command.lower()
+
+        if command == "address":
+            status = manager.status()
+            if not status.exists:
+                return CommandResponse(messages=[("system", "No wallet found. Run `/wallet create` to set one up.")])
+            if not status.public_key:
+                return CommandResponse(messages=[("system", "Wallet address unavailable.")])
+            qr_block = _address_qr_block(status.public_key)
+            message = "\n".join(
+                [
+                    f"Wallet address: {status.public_key} ({status.masked_address})",
+                    "Address QR:",
+                    qr_block,
+                ]
+            )
+            return CommandResponse(messages=[("system", message)])
+
+        if command == "help":
+            usage = "\n".join(
+                [
+                    "Usage: /wallet <subcommand>",
+                    "",
+                    "Subcommands:",
+                    "  status              Show wallet lock state, address, balance, and QR code.",
+                    "  address             Print wallet address with QR code.",
+                    "  create              Generate a new wallet (prompts for passphrase).",
+                    "  restore <secret>    Restore wallet from secret key or mnemonic.",
+                    "  unlock              Unlock wallet (prompts for passphrase).",
+                    "  lock                Lock the wallet.",
+                    "  export [path]       Export secret key (optionally to file).",
+                    "  phrase              Display recovery mnemonic (requires passphrase).",
+                    "  send <addr> <amt>   Transfer SOL after confirmation and passphrase check.",
+                ]
+            )
+            return CommandResponse(messages=[("system", usage)])
 
         if command == "create":
             if manager.wallet_exists():
@@ -143,17 +195,87 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             app.log_event("wallet", "Wallet mnemonic retrieved", severity="warning")
             return CommandResponse(messages=[("system", f"Recovery phrase:\n{mnemonic}")])
 
+        if command == "send":
+            if len(rest) < 2:
+                return CommandResponse(
+                    messages=[("system", "Usage: /wallet send <address> <amount> [--allow-unfunded-recipient]")]
+                )
+            status = manager.status()
+            if not status.exists or not status.public_key:
+                return CommandResponse(messages=[("system", "No wallet available. Create or restore one first.")])
+            destination = rest[0]
+            try:
+                amount = float(rest[1])
+            except ValueError:
+                return CommandResponse(messages=[("system", "Amount must be numeric (SOL).")])
+            if amount <= 0:
+                return CommandResponse(messages=[("system", "Amount must be greater than zero.")])
+
+            config = getattr(app, "config_context", None)
+            rpc_url = getattr(getattr(config, "config", None), "rpc_url", "https://api.devnet.solana.com")
+            max_spend = getattr(getattr(config, "config", None), "max_session_spend", None)
+            metadata = app.session_context.metadata
+            if max_spend is not None and max_spend > 0 and (metadata.spend_amount + amount) > max_spend:
+                return CommandResponse(
+                    messages=[
+                        (
+                            "system",
+                            f"Session spend cap exceeded. Attempted {amount:.3f} SOL against limit {max_spend:.3f} SOL.",
+                        )
+                    ]
+                )
+
+            qr_block = _address_qr_block(destination)
+            confirmation_lines = [
+                f"Destination: {destination}",
+                f"Amount: {amount:.3f} SOL",
+                "Destination QR:",
+                qr_block,
+                "Type 'send' to confirm or anything else to cancel.",
+            ]
+            app.console.print("\n".join(confirmation_lines))
+            passphrase = app._prompt_secret("Wallet passphrase", allow_master=False)
+            acknowledgement = app._prompt_text("Confirm transfer").strip().lower()
+            if acknowledgement != "send":
+                return CommandResponse(messages=[("system", "Transfer cancelled.")])
+            try:
+                signature = manager.send_transfer(
+                    passphrase,
+                    rpc_url=rpc_url,
+                    destination=destination,
+                    amount_sol=amount,
+                )
+            except WalletError as exc:
+                app.log_event("wallet", f"Transfer failed: {exc}", severity="error")
+                return CommandResponse(messages=[("system", f"Transfer failed: {exc}")])
+
+            metadata.spend_amount += amount
+            status = manager.status()
+            wallet_balance = app._fetch_balance(status.public_key)
+            app._update_wallet_metadata(status, balance=wallet_balance)
+            app.log_event("wallet", f"Transfer sent {amount:.3f} SOL to {destination}")
+            response_lines = [f"Transfer submitted. Signature: {signature}"]
+            if wallet_balance is not None:
+                response_lines.append(f"Wallet balance: {wallet_balance:.3f} SOL")
+            return CommandResponse(messages=[("system", "\n".join(response_lines))])
+
         app.log_event("wallet", f"Unknown wallet command '{command}'", severity="warning")
         return CommandResponse(
             messages=[
                 (
                     "system",
-                    "Unknown wallet command. Available: `/wallet status`, `/wallet create`, `/wallet restore`, `/wallet unlock`, `/wallet lock`, `/wallet export`, `/wallet phrase`.",
+                    "Unknown wallet command. Available: `/wallet status`, `/wallet address`, `/wallet create`, `/wallet restore`, `/wallet unlock`, `/wallet lock`, `/wallet export`, `/wallet phrase`, `/wallet send`, `/wallet help`.",
                 )
             ]
         )
 
-    router.register(SlashCommand("wallet", handle, "Wallet management commands"))
+    router.register(
+        SlashCommand(
+            "wallet",
+            handle,
+            "Wallet management: status | address | create | restore | unlock | lock | export | phrase | send",
+        )
+    )
 
 
 __all__ = ["register"]

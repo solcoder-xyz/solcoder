@@ -28,6 +28,7 @@ cli_app_module = importlib.import_module("solcoder.cli.app")
 class RPCStub:
     def __init__(self, balances: list[float] | None = None) -> None:
         self.balances = balances or []
+        self.endpoint = "https://api.devnet.solana.com"
 
     def get_balance(self, _public_key: str) -> float:
         if self.balances:
@@ -177,7 +178,10 @@ def test_help_command_bypasses_llm(
 
     assert llm.calls == []
     assert response.continue_loop is True
-    assert any("/help" in message for _, message in response.messages)
+    combined = "\n".join(message for _, message in response.messages)
+    assert "/help" in combined
+    assert "/wallet" in combined
+    assert "Wallet management" in combined
 
 
 def test_status_bar_snapshot_reflects_metadata(
@@ -271,6 +275,7 @@ def test_chat_message_invokes_llm(
     ack_payload = json.loads(llm.calls[1])
     assert ack_payload["type"] == "plan_ack"
     assert ack_payload["status"] == "ready"
+    assert ack_payload.get("todo_tasks")
     assert response.continue_loop is True
     assert response.messages and response.messages[0][0] == "agent"
     plan_message = response.messages[0][1]
@@ -329,7 +334,7 @@ def test_agent_requires_plan_when_todo_exists(
     script = [
         {"expect": expect_equals("work todo"), "reply": {"type": "reply", "message": "Sure"}},
         {"expect": expect_contains('"type": "error"'), "reply": {"type": "plan", "message": "Plan todo", "steps": ["Complete tasks"]}},
-        {"expect": expect_plan_ack(), "reply": {"type": "reply", "message": "Done"}},
+        {"expect": expect_plan_ack(False), "reply": {"type": "reply", "message": "Done"}},
     ]
     llm = ScriptedLLM(script)
 
@@ -361,7 +366,7 @@ def test_single_step_plan_isnt_bootstrapped(
             "reply": {"type": "plan", "message": "One step only", "steps": ["Only step"]},
         },
         {
-            "expect": expect_plan_ack(),
+            "expect": expect_plan_ack(False),
             "reply": {"type": "reply", "message": "Done"},
         },
     ]
@@ -413,7 +418,7 @@ def test_agent_loop_runs_tool(
 
     script = [
         {"expect": expect_equals("run tool please"), "reply": {"type": "plan", "message": "Plan ready", "steps": ["Call test_echo"]}},
-        {"expect": expect_plan_ack(), "reply": {"type": "tool_request", "step_title": "Echo step", "tool": {"name": "test_echo", "args": {"text": "hi"}}}},
+        {"expect": expect_plan_ack(False), "reply": {"type": "tool_request", "step_title": "Echo step", "tool": {"name": "test_echo", "args": {"text": "hi"}}}},
         {"expect": expect_tool_result("test_echo"), "reply": {"type": "reply", "message": "All done"}},
     ]
     llm = ScriptedLLM(script)
@@ -459,7 +464,7 @@ def test_agent_loop_recovers_from_invalid_json(
                 "steps": ["Retry step", "Verify outcome"],
             },
         },
-        {"expect": expect_plan_ack(), "reply": {"type": "reply", "message": "Recovered"}},
+        {"expect": expect_plan_ack(True), "reply": {"type": "reply", "message": "Recovered"}},
     ]
     llm = ScriptedLLM(script)
 
@@ -806,6 +811,65 @@ def test_wallet_status_no_wallet(
     assert context.metadata.wallet_balance is None
 
 
+def test_wallet_status_includes_qr(
+    console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    wallet_manager.create_wallet("passphrase", force=True)
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+    rpc_stub.balances = [2.0]
+
+    response = app.handle_line("/wallet status")
+
+    assert any("Address QR" in message for _, message in response.messages)
+    assert context.metadata.wallet_balance == pytest.approx(2.0)
+
+
+def test_wallet_address_command_renders_qr(
+    console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    wallet_manager.create_wallet("passphrase", force=True)
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    response = app.handle_line("/wallet address")
+
+    assert any("Wallet address:" in message for _, message in response.messages)
+    assert any("Address QR" in message for _, message in response.messages)
+
+
+def test_wallet_help_lists_subcommands(
+    console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    wallet_manager.create_wallet("passphrase", force=True)
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    response = app.handle_line("/wallet help")
+
+    combined = "\n".join(message for _, message in response.messages)
+    assert "send <addr> <amt" in combined
+    assert "address" in combined
+
+
 def test_wallet_unlock_command_updates_metadata(
     console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]
 ) -> None:
@@ -850,6 +914,63 @@ def test_wallet_export_to_file(
     assert export_path.read_text().startswith("[")
     mode = os.stat(export_path).st_mode & 0o777
     assert mode in {0o600, 0o666}
+
+
+def test_wallet_send_happy_path(
+    monkeypatch: pytest.MonkeyPatch,
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    wallet_manager.create_wallet("passphrase", force=True)
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+    )
+    rpc_stub.balances = [0.9]
+
+    monkeypatch.setattr(
+        wallet_manager,
+        "send_transfer",
+        lambda *args, **kwargs: "FakeSignature",  # type: ignore[return-value]
+    )
+    app._prompt_secret = lambda *_args, **_kwargs: "passphrase"  # type: ignore[assignment]
+    app._prompt_text = lambda *_args, **_kwargs: "send"  # type: ignore[assignment]
+
+    response = app.handle_line("/wallet send Destination11111111111111111111111111 0.1")
+
+    assert any("FakeSignature" in message for _, message in response.messages)
+    assert context.metadata.spend_amount == pytest.approx(0.1)
+    assert context.metadata.wallet_balance == pytest.approx(0.9)
+
+
+def test_wallet_send_blocks_over_spend_cap(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    wallet_manager.create_wallet("passphrase", force=True)
+    config_context.config.max_session_spend = 0.05
+    context.metadata.spend_amount = 0.04
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+    )
+
+    response = app.handle_line("/wallet send AnyAddr111111111111111111111111111111 0.02")
+
+    assert any("Session spend cap exceeded" in message for _, message in response.messages)
+    assert context.metadata.spend_amount == pytest.approx(0.04)
 
 
 def test_wallet_phrase_command(

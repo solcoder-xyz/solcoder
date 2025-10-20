@@ -567,6 +567,12 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         if ctx.todo_manager is not None
                         else None
                     )
+                    plan_spawned_tasks = False
+                    prev_revision = (
+                        ctx.todo_manager.revision
+                        if ctx.todo_manager is not None
+                        else None
+                    )
                     _bootstrap_plan_into_todo(
                         directive.steps,
                         allow_single_step=had_invalid_directive,
@@ -577,11 +583,40 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         and prev_revision is not None
                         and ctx.todo_manager.revision != prev_revision
                     ):
+                        plan_spawned_tasks = True
                         plan_added_tasks = True
                     tasks_available = bool(ctx.todo_manager and ctx.todo_manager.tasks())
                     _append_active_summary()
-                    _show_current_todo_panel()
-                    if not tasks_available:
+                    if plan_spawned_tasks:
+                        _show_current_todo_panel()
+                        if ctx.todo_manager is not None:
+                            plain_todo = ctx.todo_manager.render_plain()
+                            loop_history.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        "Current TODO snapshot:\n"
+                                        f"{plain_todo}\n\n"
+                                        "Use todo_update_list with override=false to extend the checklist or override=true to replace it completely."
+                                    ),
+                                }
+                            )
+                    ack_payload = {"type": "plan_ack", "status": "ready"}
+                    if plan_spawned_tasks and ctx.todo_manager is not None:
+                        ack_payload["todo_revision"] = ctx.todo_manager.revision
+                        ack_payload["todo_tasks"] = [
+                            {
+                                "id": task["id"],
+                                "title": task["title"],
+                                "status": task["status"],
+                            }
+                            for task in ctx.todo_manager.as_dicts()
+                        ]
+                    if (
+                        not tasks_available
+                        and directive.steps
+                        and len(directive.steps) > 1
+                    ):
                         plan_text = _format_plan_message(
                             directive.steps or [], directive.message
                         )
@@ -593,7 +628,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         status_message = Text(
                             directive.steps[0], style="solcoder.status.text"
                         )
-                    pending_prompt = AGENT_PLAN_ACK
+                    pending_prompt = json.dumps(ack_payload)
                     had_invalid_directive = False
                     continue
 

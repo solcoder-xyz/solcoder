@@ -5,6 +5,9 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -171,6 +174,78 @@ class WalletManager:
         if self._unlocked_key is None:
             raise WalletError("Wallet is locked.")
         return self._unlocked_key
+
+    def send_transfer(
+        self,
+        passphrase: str,
+        *,
+        rpc_url: str,
+        destination: str,
+        amount_sol: float,
+        allow_unfunded: bool = True,
+    ) -> str:
+        """Send `amount_sol` SOL to `destination` using the Solana CLI."""
+
+        if shutil.which("solana") is None:
+            raise WalletError("Solana CLI not found in PATH; install it to send transactions.")
+        if amount_sol <= 0:
+            raise WalletError("Transfer amount must be positive.")
+        secret = self.export_wallet(passphrase)
+        key_path: Path | None = None
+        try:
+            handle = tempfile.NamedTemporaryFile("w", delete=False, suffix=".json")
+            with handle:
+                handle.write(secret)
+                handle.flush()
+                key_path = Path(handle.name)
+            if key_path is not None:
+                os.chmod(key_path, 0o600)
+            command = ["solana", "transfer"]
+            if allow_unfunded:
+                command.append("--allow-unfunded-recipient")
+            command.extend(
+                [
+                    destination,
+                    f"{amount_sol:.9f}",
+                    "--from",
+                    str(key_path),
+                    "--url",
+                    rpc_url,
+                    "--fee-payer",
+                    str(key_path),
+                    "--output",
+                    "json",
+                ]
+            )
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        finally:
+            try:
+                if key_path is not None:
+                    key_path.unlink()
+            except Exception:
+                pass
+
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip() or "Transfer command failed."
+            raise WalletError(message)
+
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            signature = result.stdout.strip()
+            if not signature:
+                raise WalletError("Transfer succeeded but signature unavailable.")
+            return signature
+
+        signature = payload.get("signature")
+        if not signature:
+            raise WalletError("Transfer succeeded but signature missing in CLI output.")
+        return signature
 
     # ------------------------------------------------------------------
     # Internal helpers
