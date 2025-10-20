@@ -3,7 +3,7 @@
 - Milestone: [MILESTONE-3_SOLANA_DEPLOY_LOOP](../milestones/MILESTONE-3_SOLANA_DEPLOY_LOOP.md)
 
 ## Objective
-Provide automated installers triggered by `/env install` that fetch and configure Solana CLI, Anchor, Rust, and Node while streaming progress inside the REPL.
+Provide automated installers triggered by `/env install` that fetch and configure Solana CLI, Anchor, Rust, and Node while streaming progress inside the REPL, and proactively prompt users during bootstrap when critical Solana tooling is missing.
 
 ## Supported Tooling Scope
 - **Solana CLI** (`solana`) — install via official script pinned to latest stable release.
@@ -21,11 +21,12 @@ Provide automated installers triggered by `/env install` that fetch and configur
 - Bootstrap onboarding hook: on first launch, detect missing Solana environment tooling and prompt the user to run the relevant installer(s) before dropping into the REPL.
 
 ## Key Steps
-1. Define installer interface (download, install, verify) with dry-run capability.
-2. Implement tool-specific installers (e.g., Solana official script, `rustup`, npm for Anchor).
-3. Add progress spinners/log capture to CLI output; handle cancellation gracefully.
-4. Re-run diagnostics post-install and surface success/failure summary.
-5. Update `README.md`/`AGENTS.md` with installer usage and failure recovery.
+1. Extend bootstrap diagnostics to detect missing Solana environment tooling and surface an actionable installer prompt before entering the REPL.
+2. Define installer interface (download, install, verify) with dry-run capability.
+3. Implement tool-specific installers (e.g., Solana official script, `rustup`, npm for Anchor).
+4. Add progress spinners/log capture to CLI output; handle cancellation gracefully.
+5. Re-run diagnostics post-install and surface success/failure summary.
+6. Update `README.md`/`AGENTS.md` with installer usage, bootstrap onboarding flow, and failure recovery.
 
 ## Dependencies
 - Task 1.8 diagnostics to reuse detection logic.
