@@ -12,6 +12,7 @@ Provide automated installers triggered by `/env install` that fetch and configur
 - **Node.js + npm** — provide an LTS distribution (e.g., Node 20.x) packaged with npm.
 - **Yarn** — optional but recommended for template workflows; install via corepack or standalone.
 - **Python 3 + pip** — validate system Python meets scripting requirements for tooling helpers.
+- **Diagnostics coverage** — enumerate every tool above, listing installed versions and flagging missing items. Anchor is considered blocking; keep prompting until the user installs or explicitly skips.
 
 ## Deliverables
 - Installer module handling per-tool workflows with consent prompts and retry logic.
@@ -21,7 +22,7 @@ Provide automated installers triggered by `/env install` that fetch and configur
 - Bootstrap onboarding hook: on first launch, detect missing Solana environment tooling and prompt the user to run the relevant installer(s) before dropping into the REPL.
 
 ## Key Steps
-1. Extend bootstrap diagnostics to detect missing Solana environment tooling and surface an actionable installer prompt before entering the REPL.
+1. Extend bootstrap diagnostics to detect missing Solana environment tooling (Solana CLI, Anchor, Rust toolchain, Node/npm, Yarn, Python/pip) and surface an actionable installer prompt before entering the REPL.
 2. Define installer interface (download, install, verify) with dry-run capability.
 3. Implement tool-specific installers (e.g., Solana official script, `rustup`, npm for Anchor).
 4. Add progress spinners/log capture to CLI output; handle cancellation gracefully.
@@ -33,7 +34,7 @@ Provide automated installers triggered by `/env install` that fetch and configur
 - Task 1.2 CLI shell for command routing.
 
 ## Acceptance Criteria
-- On bootstrap, if Solana CLI, Anchor, Rust toolchain, or Node/npm are missing, SolCoder surfaces an inline prompt offering to run `/env install <tool>` before entering the REPL.
+- On bootstrap, if any supported tool (Solana CLI, Anchor, Rust toolchain, Node/npm, Yarn, Python/pip) is missing, SolCoder surfaces inline prompts offering to run `/env install <tool>` before entering the REPL. Anchor remains blocking unless the user explicitly skips.
 - `/env install anchor` installs Anchor CLI on tested macOS/Ubuntu hosts and prints success confirmation.
 - `/env install all` sequentially installs the supported tooling (Solana CLI, Anchor, Rust toolchain, Node/npm, Yarn) with progress feedback and post-install verification.
 - Installer failures produce actionable messages, offer retry/skip options, and do not leave CLI state inconsistent.

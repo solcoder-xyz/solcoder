@@ -161,6 +161,14 @@ def installer_display_name(tool: str) -> str:
     return spec.display_name
 
 
+def installer_key_for_diagnostic(target_name: str) -> str | None:
+    """Return the installer key that verifies against the given diagnostic name."""
+    for spec in INSTALLER_SPECS.values():
+        if target_name in spec.verification_targets:
+            return spec.key
+    return None
+
+
 def detect_missing_tools(
     diagnostics: Iterable[DiagnosticResult],
     *,
@@ -327,6 +335,7 @@ __all__ = [
     "detect_missing_tools",
     "install_tool",
     "installer_display_name",
+    "installer_key_for_diagnostic",
     "list_installable_tools",
     "required_tools",
 ]

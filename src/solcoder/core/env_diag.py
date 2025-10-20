@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Iterable, List
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ class ToolRequirement:
     executable: str
     version_args: list[str]
     remediation: str
+    fallback_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -36,24 +38,36 @@ REQUIRED_TOOLS: tuple[ToolRequirement, ...] = (
         executable="solana",
         version_args=["--version"],
         remediation="Install the Solana CLI: https://docs.solana.com/cli/install-solana-cli",
+        fallback_paths=(
+            "~/.local/share/solana/install/active_release/bin/solana",
+        ),
     ),
     ToolRequirement(
         name="Anchor",
         executable="anchor",
         version_args=["--version"],
         remediation="Install Anchor with `cargo install --git https://github.com/coral-xyz/anchor anchor-cli --locked`.",
+        fallback_paths=(
+            "~/.cargo/bin/anchor",
+        ),
     ),
     ToolRequirement(
         name="Rust Compiler",
         executable="rustc",
         version_args=["--version"],
         remediation="Install Rust using rustup: https://rustup.rs/",
+        fallback_paths=(
+            "~/.cargo/bin/rustc",
+        ),
     ),
     ToolRequirement(
         name="Cargo",
         executable="cargo",
         version_args=["--version"],
         remediation="Install Rust toolchain with rustup if Cargo is missing: https://rustup.rs/",
+        fallback_paths=(
+            "~/.cargo/bin/cargo",
+        ),
     ),
     ToolRequirement(
         name="Node.js",
@@ -72,6 +86,13 @@ REQUIRED_TOOLS: tuple[ToolRequirement, ...] = (
         executable="yarn",
         version_args=["--version"],
         remediation="Enable Yarn via Corepack: `npm install -g corepack && corepack enable`.",
+        fallback_paths=(
+            "~/.yarn/bin/yarn",
+            "~/.local/bin/yarn",
+            "~/.volta/bin/yarn",
+            "~/.fnm/bin/yarn",
+            "~/.local/share/fnm/aliases/default/bin/yarn",
+        ),
     ),
     ToolRequirement(
         name="Python 3",
@@ -103,7 +124,15 @@ def collect_environment_diagnostics(
     results: List[DiagnosticResult] = []
     for tool in tools:
         path = which(tool.executable)
-        if not path:
+        fallback_path: str | None = None
+        if not path and tool.fallback_paths:
+            for raw in tool.fallback_paths:
+                candidate = Path(raw).expanduser()
+                if candidate.exists():
+                    fallback_path = str(candidate)
+                    break
+
+        if not path and fallback_path is None:
             results.append(
                 DiagnosticResult(
                     name=tool.name,
@@ -114,6 +143,44 @@ def collect_environment_diagnostics(
                 )
             )
             continue
+
+        if not path and fallback_path:
+            try:
+                completed = exec_runner([fallback_path, *tool.version_args])
+            except Exception as exc:  # noqa: BLE001
+                results.append(
+                    DiagnosticResult(
+                        name=tool.name,
+                        status="missing",
+                        found=False,
+                        version=None,
+                        remediation=tool.remediation,
+                        details=f"Found at {fallback_path} but failed to execute: {exc}",
+                    )
+                )
+                continue
+
+            output = (completed.stdout or completed.stderr or "").strip()
+            version = output.splitlines()[0].strip() if output else "unknown"
+            parent_dir = Path(fallback_path).expanduser().parent
+            remediation = (
+                f"{tool.remediation} Add {parent_dir} to your PATH."
+                if tool.remediation
+                else f"Add {parent_dir} to your PATH."
+            )
+            results.append(
+                DiagnosticResult(
+                    name=tool.name,
+                    status="missing",
+                    found=False,
+                    version=version,
+                    remediation=remediation,
+                    details=f"Detected at {fallback_path}, but it is not on PATH.",
+                )
+            )
+            continue
+
+        assert path is not None  # for type checkers
         try:
             completed = exec_runner([path, *tool.version_args])
         except Exception as exc:  # noqa: BLE001

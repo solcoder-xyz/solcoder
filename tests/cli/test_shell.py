@@ -1013,10 +1013,10 @@ def test_bootstrap_prompts_for_missing_tools(
 
     missing_sequence = [["solana"], []]
 
-    def fake_collect():
+    def fake_collect() -> list[DiagnosticResult]:
         return []
 
-    def fake_detect(_diagnostics, *, only_required=True):
+    def fake_detect(_diagnostics, *, only_required: bool = False) -> list[str]:
         return missing_sequence.pop(0) if missing_sequence else []
 
     records: list[str] = []
@@ -1032,11 +1032,17 @@ def test_bootstrap_prompts_for_missing_tools(
             logs=("installed",),
         )
 
+    responses = ["y", ""]
+
+    def scripted_prompt(_session, _message: str) -> str:
+        return responses.pop(0)
+
     monkeypatch.setattr(cli_app_module, "collect_environment_diagnostics", fake_collect)
     monkeypatch.setattr(cli_app_module, "detect_missing_tools", fake_detect)
     monkeypatch.setattr(cli_app_module, "install_tool", fake_install)
     monkeypatch.setattr(cli_app_module, "installer_display_name", lambda tool: "Solana CLI")
-    monkeypatch.setattr(cli_app_module, "prompt_text", lambda session, message: "y")
+    monkeypatch.setattr(cli_app_module, "prompt_text", scripted_prompt)
+    monkeypatch.setattr(cli_app_module, "required_tools", lambda: ["solana"])
 
     app = CLIApp(
         console=console,
@@ -1049,7 +1055,115 @@ def test_bootstrap_prompts_for_missing_tools(
     app._handle_environment_bootstrap()
 
     assert records == ["solana"]
+    assert not responses
 
+
+def test_bootstrap_requires_explicit_anchor_skip(
+    monkeypatch: pytest.MonkeyPatch,
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+
+    missing_sequence = [["anchor"], ["anchor"], []]
+
+    def fake_collect() -> list[DiagnosticResult]:
+        return []
+
+    def fake_detect(_diagnostics, *, only_required: bool = False) -> list[str]:
+        return missing_sequence.pop(0) if missing_sequence else []
+
+    install_calls: list[str] = []
+
+    def fake_install(tool: str, **kwargs):  # type: ignore[override]
+        install_calls.append(tool)
+        pytest.fail("Anchor installer should not run when user skips.")
+
+    responses = ["n", "skip", "skip", ""]
+    prompts: list[str] = []
+
+    def scripted_prompt(_session, message: str) -> str:
+        prompts.append(message)
+        return responses.pop(0)
+
+    monkeypatch.setattr(cli_app_module, "collect_environment_diagnostics", fake_collect)
+    monkeypatch.setattr(cli_app_module, "detect_missing_tools", fake_detect)
+    monkeypatch.setattr(cli_app_module, "install_tool", fake_install)
+    monkeypatch.setattr(cli_app_module, "installer_display_name", lambda tool: "Anchor CLI")
+    monkeypatch.setattr(cli_app_module, "prompt_text", scripted_prompt)
+    monkeypatch.setattr(cli_app_module, "required_tools", lambda: ["anchor"])
+
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    app._handle_environment_bootstrap()
+
+    assert install_calls == []
+    assert not responses
+    assert sum("Anchor CLI is missing" in prompt for prompt in prompts) == 2
+    assert len(prompts) == 4
+    assert any(prompt.startswith("Anchor powers Solana deploy flows") for prompt in prompts)
+    assert prompts[-1].startswith("Diagnostics complete")
+
+
+def test_bootstrap_prompts_for_shell_reload_when_tool_off_path(
+    monkeypatch: pytest.MonkeyPatch,
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    tmp_path: Path,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    location = tmp_path / ".cargo" / "bin" / "anchor"
+
+    diagnostics = [
+        DiagnosticResult(
+            name="Anchor",
+            status="missing",
+            found=False,
+            version="anchor-cli 0.32.1",
+            remediation="Add the directory to PATH.",
+            details=f"Detected at {location}, but it is not on PATH.",
+        )
+    ]
+
+    monkeypatch.setattr(cli_app_module, "collect_environment_diagnostics", lambda: diagnostics)
+
+    def fake_detect(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("detect_missing_tools should not be called when exiting early")
+
+    monkeypatch.setattr(cli_app_module, "detect_missing_tools", fake_detect)
+    monkeypatch.setattr(cli_app_module, "installer_display_name", lambda tool: "Anchor CLI")
+    monkeypatch.setattr(
+        cli_app_module,
+        "installer_key_for_diagnostic",
+        lambda name: "anchor" if name == "Anchor" else None,
+    )
+    monkeypatch.setattr(cli_app_module, "install_tool", lambda *args, **kwargs: None)
+
+    responses = ["y"]
+
+    def scripted_prompt(_session, message: str) -> str:
+        return responses.pop(0)
+
+    monkeypatch.setattr(cli_app_module, "prompt_text", scripted_prompt)
+
+    app = CLIApp(
+        console=console,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+    )
+
+    with pytest.raises(SystemExit):
+        app._handle_environment_bootstrap()
+
+    assert not responses
 
 def test_template_counter_command(
     console: Console,

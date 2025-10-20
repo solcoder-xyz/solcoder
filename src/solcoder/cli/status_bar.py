@@ -91,6 +91,9 @@ class StatusBar:
     def supports_toolbar(self) -> bool:
         return self._supports_toolbar
 
+    def set_toolbar_support(self, value: bool) -> None:
+        self._supports_toolbar = value
+
     def snapshot(self) -> StatusSnapshot:
         metadata = self._context_manager.session_context.metadata
         session_id = metadata.session_id

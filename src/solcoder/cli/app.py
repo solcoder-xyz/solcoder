@@ -12,10 +12,12 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
+from rich import box
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.spinner import Spinner
+from rich.table import Table
 from rich.text import Text
 
 from solcoder.cli.branding import (
@@ -30,7 +32,12 @@ from solcoder.cli.status_bar import StatusBar
 from solcoder.cli.stub_llm import StubLLM
 from solcoder.cli.types import CommandResponse, CommandRouter, LLMBackend
 from solcoder.cli.wallet_prompts import prompt_secret, prompt_text
-from solcoder.core import ConfigContext, ConfigManager, collect_environment_diagnostics
+from solcoder.core import (
+    ConfigContext,
+    ConfigManager,
+    DiagnosticResult,
+    collect_environment_diagnostics,
+)
 from solcoder.core.agent_loop import (
     DEFAULT_AGENT_MAX_ITERATIONS,
     AgentLoopContext,
@@ -42,6 +49,8 @@ from solcoder.core.installers import (
     detect_missing_tools,
     install_tool,
     installer_display_name,
+    installer_key_for_diagnostic,
+    required_tools,
 )
 from solcoder.core.llm import LLMError
 from solcoder.core.logs import LogBuffer, LogEntry
@@ -268,7 +277,9 @@ class CLIApp:
     # ------------------------------------------------------------------
     def run(self) -> None:
         """Start the interactive REPL."""
-        self._handle_environment_bootstrap()
+        should_clear = self._handle_environment_bootstrap()
+        if should_clear:
+            self.console.clear()
         self._render_banner()
         session_id = self.session_context.metadata.session_id
         metadata = self.session_context.metadata
@@ -355,71 +366,300 @@ class CLIApp:
         self._refresh_status_bar()
         return response
 
-    def _handle_environment_bootstrap(self) -> None:
+    def _handle_environment_bootstrap(self) -> bool:
         try:
-            diagnostics = collect_environment_diagnostics()
+            hide_status = getattr(self.status_bar, "supports_toolbar", False)
+            if hide_status and hasattr(self.status_bar, "set_toolbar_support"):
+                self.status_bar.set_toolbar_support(False)
+
+            with self.console.status("Running environment diagnostics...", spinner="dots"):
+                diagnostics = collect_environment_diagnostics()
         except Exception as exc:  # noqa: BLE001
             logger.debug("Environment diagnostics failed during bootstrap: %s", exc)
-            return
+            return False
+        finally:
+            if hide_status and hasattr(self.status_bar, "set_toolbar_support"):
+                self.status_bar.set_toolbar_support(True)
 
-        missing = detect_missing_tools(diagnostics, only_required=True)
-        if not missing:
-            return
+        required_set = set(required_tools())
 
-        missing_names = ", ".join(installer_display_name(tool) for tool in missing)
-        panel_text = Text.from_markup(
-            "\n".join(
-                [
-                    "[#FACC15]Environment Setup[/]",
-                    "[#94A3B8]The following Solana tooling is missing:[/]",
-                    f"[#F97316]{missing_names}[/]",
-                    "",
-                    "Install them now? (y/N)",
-                ]
+        def render_diagnostics_table(results: list[DiagnosticResult]) -> None:
+            table = Table(
+                title=None,
+                box=box.SIMPLE_HEAD,
+                show_edge=False,
+                pad_edge=False,
+                header_style="bold #38BDF8",
             )
-        )
-        self.console.print(
-            Panel(
-                panel_text,
-                title="[bold #38BDF8]Environment Installers[/]",
-                border_style="#FACC15",
+            table.add_column("Tool", style="#38BDF8", no_wrap=True)
+            table.add_column("Status", style="#14F195", no_wrap=True)
+            table.add_column("Detail", style="#94A3B8")
+
+            status_styles = {
+                "ok": "#14F195",
+                "warn": "#FACC15",
+                "missing": "#F97316",
+                "error": "#FB7185",
+            }
+
+            for item in results:
+                detail = ""
+                if item.found and item.version:
+                    detail = item.version
+                elif item.found:
+                    detail = "Detected (version unavailable)"
+                elif item.remediation:
+                    detail = item.remediation
+                else:
+                    detail = "Not found on PATH"
+
+                status_label = item.status.lower()
+                style = status_styles.get(status_label, "#38BDF8")
+                display_status = status_label.upper()
+                table.add_row(item.name, f"[{style}]{display_status}[/{style}]", detail)
+
+            panel = Panel(
+                table,
+                title="[bold #38BDF8]Environment Diagnostics[/]",
+                border_style="#38BDF8",
                 padding=(1, 2),
             )
-        )
+            self.console.print(panel)
 
-        answer = prompt_text(self.session, "Install missing tools now? [y/N]").strip().lower()
-        if answer not in {"y", "yes"}:
+        def manual_missing(results: list[DiagnosticResult]) -> set[str]:
+            manual_names = {
+                item.name
+                for item in results
+                if item.name in {"Python 3", "pip"} and not item.found
+            }
+            return manual_names
+
+        def show_manual_notice(
+            current: set[str], previous: set[str]
+        ) -> set[str]:
+            if not current or current == previous:
+                return previous
+            names = ", ".join(sorted(current))
             self.console.print(
-                "[#94A3B8]Skipping automated installs. You can run `/env install` later.[/]"
+                f"[#F97316]Manual setup required for: {names}. "
+                "Follow the remediation guidance above to install them.[/]"
             )
-            return
+            return current
 
-        for tool in missing:
-            name = installer_display_name(tool)
+        def parse_install_location(details: str | None) -> str | None:
+            if not details or "Detected at" not in details:
+                return None
+            fragment = details.split("Detected at", 1)[1]
+            fragment = fragment.split(" but", 1)[0]
+            fragment = fragment.split(",", 1)[0]
+            location = fragment.strip()
+            return location or None
+
+        def shell_hint_for(path_str: str) -> tuple[str, str]:
+            lowered = path_str.lower()
+            if ".cargo/bin" in lowered:
+                return (
+                    '. "$HOME/.cargo/env"',
+                    "Add `source \"$HOME/.cargo/env\"` to your ~/.zshrc (or ~/.bashrc) "
+                    "and restart the terminal.",
+                )
+            if "solana" in lowered:
+                parent = Path(path_str).expanduser().parent
+                export = f'export PATH="{parent}:$PATH"'
+                return (
+                    export,
+                    f"Add `{export}` to your shell config (e.g., ~/.zshrc) and reload it.",
+                )
+            if ".fnm" in lowered or "corepack" in lowered:
+                parent = Path(path_str).expanduser().parent
+                export = f'export PATH="{parent}:$PATH"'
+                return (
+                    export,
+                    f"Add `{export}` to ~/.zshrc and run `corepack enable` if not already.",
+                )
+            parent = Path(path_str).expanduser().parent
+            export = f'export PATH="{parent}:$PATH"'
+            return (
+                export,
+                f"Add `{export}` to your shell config file and restart the terminal.",
+            )
+
+        def run_installer(tool_key: str) -> bool:
+            name = installer_display_name(tool_key)
             self.console.print(f"[#38BDF8]Installing {name}...[/]")
             try:
-                result = install_tool(tool, console=self.console)
+                result = install_tool(tool_key, console=self.console)
             except InstallerError as exc:  # pragma: no cover - interactive failure
                 self.console.print(f"[#F97316]Failed to install {name}: {exc}[/]")
                 self.log_event("install", f"{name} install error: {exc}", severity="error")
-                continue
+                return False
 
             if result.success and result.verification_passed:
                 self.console.print(f"[#14F195]Installed {name} successfully.[/]")
                 self.log_event("install", f"{name} installed", severity="info")
-            else:
-                error_detail = result.error or "verification failed"
-                self.console.print(f"[#F97316]{name} installation incomplete: {error_detail}[/]")
-                self.log_event("install", f"{name} install incomplete: {error_detail}", severity="warning")
+                return True
 
-        refreshed = collect_environment_diagnostics()
-        remaining = detect_missing_tools(refreshed, only_required=True)
+            error_detail = result.error or "verification failed"
+            self.console.print(f"[#F97316]{name} installation incomplete: {error_detail}[/]")
+            self.log_event(
+                "install", f"{name} install incomplete: {error_detail}", severity="warning"
+            )
+            return False
+
+        def prompt_for_tool(tool_key: str) -> str:
+            name = installer_display_name(tool_key)
+            is_anchor = tool_key == "anchor"
+            required = tool_key in required_set
+            default_yes = required or is_anchor
+            options = "Y/n/skip" if default_yes else "y/N/skip"
+            prompt_message = f"{name} is missing. Install now? ({options})"
+
+            while True:
+                answer = prompt_text(self.session, prompt_message).strip().lower()
+                if not answer:
+                    answer = "y" if default_yes else "n"
+                if answer in {"y", "yes"}:
+                    return "install"
+                if answer in {"skip", "s"}:
+                    if is_anchor:
+                        confirm = prompt_text(
+                            self.session,
+                            (
+                                "Anchor powers Solana deploy flows. "
+                                "Type 'skip' again to continue without installing."
+                            ),
+                        ).strip().lower()
+                        if confirm != "skip":
+                            self.console.print(
+                                "[#FACC15]Anchor skip not confirmed; will keep prompting.[/]"
+                            )
+                            continue
+                    return "skip"
+                if answer in {"n", "no"}:
+                    if is_anchor:
+                        self.console.print(
+                            "[#FACC15]Anchor is required for deploy workflows. "
+                            "Choose 'skip' if you must proceed without it.[/]"
+                        )
+                        continue
+                    return "skip"
+                self.console.print("[#94A3B8]Please respond with 'y', 'n', or 'skip'.[/]")
+
+        render_diagnostics_table(diagnostics)
+        manual_state = show_manual_notice(manual_missing(diagnostics), set())
+
+        path_only: list[tuple[DiagnosticResult, str]] = []
+        for item in diagnostics:
+            location = parse_install_location(item.details)
+            if location:
+                path_only.append((item, location))
+
+        skipped: set[str] = set()
+        if path_only:
+            self.console.print("[#FACC15]Tools detected but not yet on PATH:[/]")
+            for diag_item, location in path_only:
+                self.console.print(f"  - {diag_item.name}: {location}")
+
+            grouped: dict[tuple[str, str], list[str]] = {}
+            for diag_item, location in path_only:
+                quick_cmd, persistent_msg = shell_hint_for(location)
+                grouped.setdefault((quick_cmd, persistent_msg), []).append(
+                    diag_item.name
+                )
+                key = installer_key_for_diagnostic(diag_item.name)
+                if key:
+                    skipped.add(key)
+
+            for (quick_cmd, persistent_msg), tool_names in grouped.items():
+                names = ", ".join(tool_names)
+                self.console.print(
+                    f"[#38BDF8]Temporary fix for {names}:[/] `{quick_cmd}`"
+                )
+                self.console.print(f"[#94A3B8]Persist it:[/] {persistent_msg}")
+
+            answer = prompt_text(
+                self.session,
+                "Reload your shell to apply PATH changes now? (y/N)",
+            ).strip().lower()
+            if answer in {"y", "yes"}:
+                self.console.print(
+                    "[#38BDF8]Closing SolCoder. "
+                    "Run each quick fix command above, append the persistent export to your shell profile "
+                    "(e.g., `~/.zshrc`), then reload with `source ~/.zshrc` or `exec $SHELL -l` before restarting.[/]"
+                )
+                raise SystemExit(0)
+
+        while True:
+            missing_all = detect_missing_tools(diagnostics, only_required=False)
+            pending = [tool for tool in missing_all if tool not in skipped]
+            if not pending:
+                break
+
+            tool = "anchor" if "anchor" in pending else pending[0]
+            decision = prompt_for_tool(tool)
+            name = installer_display_name(tool)
+
+            if decision == "skip":
+                skipped.add(tool)
+                severity = "warning" if tool in required_set else "info"
+                if tool == "anchor":
+                    self.console.print(
+                        "[#F97316]Anchor install skipped. "
+                        "Run `/env install anchor` before attempting deploys.[/]"
+                    )
+                else:
+                    self.console.print(
+                        f"[#94A3B8]{name} install skipped. "
+                        f"Run `/env install {tool}` later as needed.[/]"
+                    )
+                self.log_event(
+                    "install",
+                    f"{name} skipped during bootstrap",
+                    severity=severity,
+                )
+                continue
+
+            installed = run_installer(tool)
+
+            try:
+                with self.console.status("Re-running diagnostics...", spinner="dots"):
+                    diagnostics = collect_environment_diagnostics()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "Environment diagnostics failed after installing %s: %s", tool, exc
+                )
+                self.console.print(
+                    "[#F97316]Unable to refresh environment diagnostics. "
+                    "Run `/env diag` once ready.[/]"
+                )
+                return True
+
+            render_diagnostics_table(diagnostics)
+            manual_state = show_manual_notice(manual_missing(diagnostics), manual_state)
+
+            if installed:
+                continue
+
+        remaining = detect_missing_tools(diagnostics, only_required=False)
         if remaining:
             remaining_names = ", ".join(installer_display_name(tool) for tool in remaining)
             self.console.print(
                 f"[#FACC15]Setup note:[/] Still missing: {remaining_names}. "
                 "Run `/env install <tool>` when ready."
             )
+
+        manual_state = manual_missing(diagnostics)
+        if manual_state:
+            names = ", ".join(sorted(manual_state))
+            self.console.print(
+                f"[#F97316]Reminder:[/] {names} require manual installation steps."
+            )
+
+        prompt_text(
+            self.session,
+            "Diagnostics complete. Press Enter when you’re ready to open the SolCoder shell.",
+        )
+        return True
 
     def log_event(
         self, category: str, message: str, *, severity: str = "info"

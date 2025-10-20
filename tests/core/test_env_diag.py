@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 from subprocess import CompletedProcess
 from typing import Iterable
+from pathlib import Path
 
 from solcoder.core.env_diag import (
     DiagnosticResult,
@@ -95,3 +97,46 @@ def test_collect_environment_diagnostics_handles_runner_errors() -> None:
     assert result.status == "error"
     assert result.details == "boom"
     assert result.remediation == "Reinstall flaky tool."
+
+
+def test_collect_environment_diagnostics_reports_fallback_hint(tmp_path: Path) -> None:
+    fallback = tmp_path / "bin" / "example"
+    fallback.parent.mkdir(parents=True)
+    fallback.write_text("#!/bin/sh\nexit 0\n")
+    os.chmod(fallback, 0o755)
+
+    tool = ToolRequirement(
+        name="Example Tool",
+        executable="example",
+        version_args=["--version"],
+        remediation="Install example.",
+        fallback_paths=(str(fallback),),
+    )
+
+    def resolver(_executable: str) -> str | None:
+        return None
+
+    runner = _runner_factory(
+        {
+            str(fallback): CompletedProcess(
+                args=[str(fallback), "--version"],
+                returncode=0,
+                stdout="example 2.0.0\n",
+                stderr="",
+            )
+        }
+    )
+
+    results = collect_environment_diagnostics(
+        runner=runner,
+        resolver=resolver,
+        tools=(tool,),
+    )
+
+    assert len(results) == 1
+    result = results[0]
+    assert not result.found
+    assert result.status == "missing"
+    assert result.version == "example 2.0.0"
+    assert result.details == f"Detected at {fallback}, but it is not on PATH."
+    assert "Add" in (result.remediation or "")
