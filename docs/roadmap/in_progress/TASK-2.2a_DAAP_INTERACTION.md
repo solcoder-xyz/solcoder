@@ -1,19 +1,19 @@
-# Task 2.2a — Program Interaction (Anchor‑First)
+# Task 2.2a — DAAP Interaction (Anchor‑First)
 
 - Milestone: [MILESTONE-3_SOLANA_DEPLOY_LOOP](../milestones/MILESTONE-3_SOLANA_DEPLOY_LOOP.md)
 
 ## Objective
-Add a CLI command and agent tool to interact with on-chain programs by program ID: inspect instructions, prompt for args/accounts, and build + send transactions with explicit user confirmation.
+Add a CLI command and agent tool to interact with on-chain programs by DAAP ID: inspect instructions, prompt for args/accounts, and build + send transactions with explicit user confirmation.
 
 ## Deliverables
-- New CLI command `/program` (aliases: `/dapp`, `/interact`).
-  - `inspect <program_id>` — fetch IDL (Anchor) or use SPL catalog; list instructions with args and required accounts (signer/writable flags).
-  - `call <program_id> [--method <name>] [--args-json <json>] [--accounts-json <json>] [--confirm]` — fast-path call; prompts for any missing values; shows summary; requires confirmation.
-  - `wizard <program_id>` — interactive flow to select instruction, fill args/accounts, preview, and submit.
+- New CLI command `/daap`.
+  - `inspect <daap_id>` — fetch IDL (Anchor) or use SPL catalog; list instructions with args and required accounts (signer/writable flags).
+  - `call <daap_id> [--method <name>] [--args-json <json>] [--accounts-json <json>] [--confirm]` — fast-path call; prompts for any missing values; shows summary; requires confirmation.
+  - `wizard <daap_id>` — interactive flow to select instruction, fill args/accounts, preview, and submit.
   - `idl import <path|url>` — attach user-provided IDL to the session for future calls.
-- Agent toolkit `solcoder.program` with tools:
-  - `inspect_program { program_id }` — returns instruction list + arg/account schema (no side effects).
-  - `prepare_program_call { program_id, method, args?, accounts? }` — returns `dispatch_command` to `/program call …` for CLI confirmation (passphrase + explicit "send").
+- Agent toolkit `solcoder.daap` with tools:
+  - `inspect_daap { daap_id }` — returns instruction list + arg/account schema (no side effects).
+  - `prepare_daap_call { daap_id, method, args?, accounts? }` — returns `dispatch_command` to `/daap call …` for CLI confirmation (passphrase + explicit "send").
 - Built-in SPL fallback catalog (Token, Token‑2022, Associated Token, Memo, Metaplex Metadata) with minimal instruction and account schemas.
 - IDL persistence per session and a "raw mode" that allows manual Borsh schema input if no IDL/catalog match.
 
@@ -23,8 +23,8 @@ Add a CLI command and agent tool to interact with on-chain programs by program I
 3. Last resort: prompt to paste/import an IDL JSON or operate in raw mode with user-provided Borsh schemas.
 
 ## Key Steps
-1. Add CLI command module at `src/solcoder/cli/commands/program.py` with subcommands and rich tables for instructions/args/accounts.
-2. Add agent toolkit at `src/solcoder/core/tools/program.py` with `inspect_program` and `prepare_program_call` returning `dispatch_command` and `suppress_preview`.
+1. Add CLI command module at `src/solcoder/cli/commands/daap.py` with subcommands and rich tables for instructions/args/accounts.
+2. Add agent toolkit at `src/solcoder/core/tools/daap.py` with `inspect_daap` and `prepare_daap_call` returning `dispatch_command` and `suppress_preview`.
 3. Implement SPL catalog under `src/solcoder/solana/catalog/` with compact JSON schemas; loader that matches well-known program IDs.
 4. Detect optional `anchorpy`; if missing, prompt to install or continue with fallback modes. Respect configured `rpc_url` and active wallet.
 5. Transaction flow: build instruction, assemble accounts (support IDL seeds where available), show summary (method, args, accounts, estimated fee), require explicit confirmation, then sign + send.
@@ -45,4 +45,3 @@ Add a CLI command and agent tool to interact with on-chain programs by program I
 - Solana engineer (Anchor/IDL client, SPL catalog).
 - CLI engineer (command UX, summary/confirmation).
 - QA (mocked RPC/IDL tests, devnet smoke test).
-
