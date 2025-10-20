@@ -5,6 +5,14 @@
 ## Objective
 Provide automated installers triggered by `/env install` that fetch and configure Solana CLI, Anchor, Rust, and Node while streaming progress inside the REPL.
 
+## Supported Tooling Scope
+- **Solana CLI** (`solana`) — install via official script pinned to latest stable release.
+- **Anchor CLI** (`anchor`) — install through `cargo install` with locked git tag.
+- **Rust toolchain** (`rustup`, `cargo`, `rustc`) — ensure minimal nightly/channel required by Anchor is present.
+- **Node.js + npm** — provide an LTS distribution (e.g., Node 20.x) packaged with npm.
+- **Yarn** — optional but recommended for template workflows; install via corepack or standalone.
+- **Python 3 + pip** — validate system Python meets scripting requirements for tooling helpers.
+
 ## Deliverables
 - Installer module handling per-tool workflows with consent prompts and retry logic.
 - `/env install <tool>` and `/env install all` commands integrated with Rich progress UI.
