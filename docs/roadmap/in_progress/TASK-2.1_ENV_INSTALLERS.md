@@ -33,9 +33,11 @@ Provide automated installers triggered by `/env install` that fetch and configur
 - Task 1.2 CLI shell for command routing.
 
 ## Acceptance Criteria
+- On bootstrap, if Solana CLI, Anchor, Rust toolchain, or Node/npm are missing, SolCoder surfaces an inline prompt offering to run `/env install <tool>` before entering the REPL.
 - `/env install anchor` installs Anchor CLI on tested macOS/Ubuntu hosts and prints success confirmation.
-- Installer failures produce actionable messages and do not leave CLI in inconsistent state.
-- Documentation reflects prerequisites and safe re-run instructions.
+- `/env install all` sequentially installs the supported tooling (Solana CLI, Anchor, Rust toolchain, Node/npm, Yarn) with progress feedback and post-install verification.
+- Installer failures produce actionable messages, offer retry/skip options, and do not leave CLI state inconsistent.
+- Documentation reflects prerequisites, bootstrap onboarding behavior, and safe re-run instructions.
 
 ## Owners
 - Solana/Anchor engineer primary; QA validates installs on clean VMs.
