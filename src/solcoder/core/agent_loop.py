@@ -447,19 +447,49 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             directive.steps,
                             allow_single_step=had_invalid_directive,
                         )
-                        if (
+                        plan_spawned_tasks = (
                             not preexisting_unfinished
                             and ctx.todo_manager is not None
                             and prev_revision is not None
                             and ctx.todo_manager.revision != prev_revision
-                        ):
+                        )
+                        if plan_spawned_tasks:
                             plan_added_tasks = True
                         tasks_available = bool(
                             ctx.todo_manager and ctx.todo_manager.tasks()
                         )
                         _append_active_summary()
-                        _show_current_todo_panel()
-                        if not tasks_available:
+                        if plan_spawned_tasks:
+                            _show_current_todo_panel()
+                            if ctx.todo_manager is not None:
+                                plain_todo = ctx.todo_manager.render_plain()
+                                loop_history.append(
+                                    {
+                                        "role": "system",
+                                        "content": (
+                                            "Current TODO snapshot:\n"
+                                            f"{plain_todo}\n\n"
+                                            "Use todo_update_list with override=false to extend the checklist or override=true to replace it completely."
+                                        ),
+                                    }
+                                )
+                        ack_payload = {"type": "plan_ack", "status": "ready"}
+                        if plan_spawned_tasks and ctx.todo_manager is not None:
+                            ack_payload["todo_revision"] = ctx.todo_manager.revision
+                            ack_payload["todo_tasks"] = [
+                                {
+                                    "id": task["id"],
+                                    "title": task["title"],
+                                    "status": task["status"],
+                                }
+                                for task in ctx.todo_manager.as_dicts()
+                            ]
+
+                        if (
+                            not tasks_available
+                            and directive.steps
+                            and len(directive.steps) > 1
+                        ):
                             plan_text = _format_plan_message(
                                 directive.steps or [], directive.message
                             )
@@ -471,7 +501,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             status_message = Text(
                                 directive.steps[0], style="solcoder.status.text"
                             )
-                        pending_prompt = AGENT_PLAN_ACK
+                        pending_prompt = json.dumps(ack_payload)
                         had_invalid_directive = False
                         continue
 
@@ -775,15 +805,16 @@ def _agent_system_prompt(
         "6. After the orchestrator sends you tool results, continue the loop using the "
         "latest context until you can emit a final reply.\n"
         "7. Do not invent tools. Only use the manifest provided below.\n"
-        "8. Use todo_update_list when you need to track multi-step work: send the complete ordered checklist "
-        "with each task providing a name and status (todo, in_progress, or done). Skip TODO tools entirely for quick answers. "
+        "8. Use todo_update_list to manage multi-step work. Prefer override=false to append or tweak new milestones while "
+        "preserving existing tasks; use override=true only when you intend to replace the entire checklist. "
+        "Each task must include a name and status (todo, in_progress, or done). Skip TODO tools entirely for quick answers. "
         "Reserve generate_plan for long-term strategy. Set show_todo_list=true when you want the CLI to render the checklist.\n"
         "9. If the user indicates they want to end the conversation or close SolCoder, invoke the "
         "quit tool to terminate the session gracefully, then acknowledge the shutdown with a final reply.\n"
         "10. Every response must be a single JSON object matching the schema above. Non-compliant outputs will be ignored and you will be asked once to retry.\n"
         "11. To run commands or make filesystem changes, you must call execute_shell_command via a tool_request. Never embed raw shell or here-doc snippets in your JSON.\n"
-        "12. Each todo_update_list call should include every task you intend to keep; omit entries to remove them and you may reuse ids to preserve history. "
-        "Sending an empty array clears the list. Avoid creating duplicate management tasks or paraphrased duplicates.\n"
+        "12. With override=true you must resubmit every task you intend to keep. With override=false the list is extended, but duplicate or conflicting tasks still raise errors. "
+        "Sending an empty array with override=true clears the list. Avoid creating duplicate management tasks or paraphrased duplicates.\n"
         "TODO Discipline (Policy): Use TODO only for milestone-level outcomes visible to the user. "
         "Do not create checklist items for trivial sub-steps or for managing the list itself. "
         "Seed milestones during planning and keep at least two tasks whenever the list is populated. "

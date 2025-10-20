@@ -100,6 +100,20 @@ def expect_equals(expected: str) -> Callable[[str], None]:
     return _check
 
 
+def expect_plan_ack(expect_todo: bool | None = None) -> Callable[[str], None]:
+    def _check(actual: str) -> None:
+        payload = json.loads(actual)
+        assert payload.get("type") == "plan_ack"
+        assert payload.get("status") == "ready"
+        has_todo = "todo_tasks" in payload and bool(payload.get("todo_tasks"))
+        if expect_todo is True:
+            assert has_todo, "Expected todo_tasks in plan_ack payload"
+        elif expect_todo is False:
+            assert not has_todo, f"Did not expect todo_tasks but received {payload.get('todo_tasks')}"
+
+    return _check
+
+
 def expect_tool_result(tool_name: str) -> Callable[[str], None]:
     def _check(actual: str) -> None:
         payload = json.loads(actual)
@@ -252,7 +266,11 @@ def test_chat_message_invokes_llm(
 
     response = app.handle_line("hello solcoder")
 
-    assert llm.calls == ["hello solcoder", AGENT_PLAN_ACK]
+    assert len(llm.calls) == 2
+    assert llm.calls[0] == "hello solcoder"
+    ack_payload = json.loads(llm.calls[1])
+    assert ack_payload["type"] == "plan_ack"
+    assert ack_payload["status"] == "ready"
     assert response.continue_loop is True
     assert response.messages and response.messages[0][0] == "agent"
     plan_message = response.messages[0][1]
@@ -311,7 +329,7 @@ def test_agent_requires_plan_when_todo_exists(
     script = [
         {"expect": expect_equals("work todo"), "reply": {"type": "reply", "message": "Sure"}},
         {"expect": expect_contains('"type": "error"'), "reply": {"type": "plan", "message": "Plan todo", "steps": ["Complete tasks"]}},
-        {"expect": expect_equals(AGENT_PLAN_ACK), "reply": {"type": "reply", "message": "Done"}},
+        {"expect": expect_plan_ack(), "reply": {"type": "reply", "message": "Done"}},
     ]
     llm = ScriptedLLM(script)
 
@@ -343,7 +361,7 @@ def test_single_step_plan_isnt_bootstrapped(
             "reply": {"type": "plan", "message": "One step only", "steps": ["Only step"]},
         },
         {
-            "expect": expect_equals(AGENT_PLAN_ACK),
+            "expect": expect_plan_ack(),
             "reply": {"type": "reply", "message": "Done"},
         },
     ]
@@ -362,7 +380,7 @@ def test_single_step_plan_isnt_bootstrapped(
 
     assert llm.script == []
     assert not app.todo_manager.tasks()
-    assert any("One step only" in message for _, message in response.messages)
+    assert all("One step only" not in message for _, message in response.messages)
     assert all("[[RENDER_TODO_PANEL]]" not in message for _, message in response.messages)
 
 
@@ -395,7 +413,7 @@ def test_agent_loop_runs_tool(
 
     script = [
         {"expect": expect_equals("run tool please"), "reply": {"type": "plan", "message": "Plan ready", "steps": ["Call test_echo"]}},
-        {"expect": expect_equals(AGENT_PLAN_ACK), "reply": {"type": "tool_request", "step_title": "Echo step", "tool": {"name": "test_echo", "args": {"text": "hi"}}}},
+        {"expect": expect_plan_ack(), "reply": {"type": "tool_request", "step_title": "Echo step", "tool": {"name": "test_echo", "args": {"text": "hi"}}}},
         {"expect": expect_tool_result("test_echo"), "reply": {"type": "reply", "message": "All done"}},
     ]
     llm = ScriptedLLM(script)
@@ -420,7 +438,9 @@ def test_agent_loop_runs_tool(
     assert tool_entries[0]["status"] == "success"
     assert llm.script == []
     assert llm.calls[0] == "run tool please"
-    assert llm.calls[1] == AGENT_PLAN_ACK
+    ack_payload = json.loads(llm.calls[1])
+    assert ack_payload["type"] == "plan_ack"
+    assert ack_payload["status"] == "ready"
 
 
 def test_agent_loop_recovers_from_invalid_json(
@@ -439,7 +459,7 @@ def test_agent_loop_recovers_from_invalid_json(
                 "steps": ["Retry step", "Verify outcome"],
             },
         },
-        {"expect": expect_equals(AGENT_PLAN_ACK), "reply": {"type": "reply", "message": "Recovered"}},
+        {"expect": expect_plan_ack(), "reply": {"type": "reply", "message": "Recovered"}},
     ]
     llm = ScriptedLLM(script)
 

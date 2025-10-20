@@ -64,16 +64,32 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
             raise ToolInvocationError("Field 'tasks' is required.")
         if not isinstance(tasks_payload, list):
             raise ToolInvocationError("Field 'tasks' must be an array.")
+        if "override" not in payload:
+            raise ToolInvocationError("Field 'override' is required.")
+        override_mode = _bool_flag(payload, "override", default=False)
         show = _bool_flag(payload, "show_todo_list", default=True)
         expected_rev = payload.get("if_match", manager.revision)
+        combined_tasks = tasks_payload
+        if not override_mode:
+            existing = [
+                {
+                    "id": task_dict["id"],
+                    "name": task_dict["title"],
+                    "description": task_dict.get("description"),
+                    "status": task_dict["status"],
+                }
+                for task_dict in manager.as_dicts()
+            ]
+            combined_tasks = existing + tasks_payload
         try:
-            updated = manager.replace_tasks(tasks_payload, expected_revision=expected_rev)
+            updated = manager.replace_tasks(combined_tasks, expected_revision=expected_rev)
         except ValueError as exc:
             todo_render = manager.render()
             raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
         total = len(updated)
+        action = "replaced" if override_mode else "extended"
         summary = f"TODO list now has {total} item{'s' if total != 1 else ''}."
-        event = f"TODO list updated ({total} task{'s' if total != 1 else ''})."
+        event = f"TODO list {action} ({total} task{'s' if total != 1 else ''})."
         show = show or total > 0
         return _result(event, summary=summary, show=show)
 
@@ -112,7 +128,8 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
         Tool(
             name="todo_update_list",
             description=(
-                "Replace the TODO list with an ordered milestone checklist. "
+                "Manage the TODO list as milestone checkpoints. "
+                "Set override=true to replace the entire list, or override=false to append new items while preserving existing tasks. "
                 "Keep the list empty or track two or more outcomes, skip micro-steps or TODO management entries, "
                 "and only mark items done after validators/tests succeed."
             ),
@@ -150,6 +167,10 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
                             "required": ["name", "status"],
                         },
                     },
+                    "override": {
+                        "type": "boolean",
+                        "description": "true to replace the entire list; false to append new tasks to the existing list.",
+                    },
                     "show_todo_list": {
                         "type": "boolean",
                         "description": "Set true to request the CLI render the TODO list after updating.",
@@ -159,7 +180,7 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
                         "description": "Expected TODO revision before applying the change.",
                     },
                 },
-                "required": ["tasks"],
+                "required": ["tasks", "override"],
             },
             output_schema={"type": "object"},
             handler=_update_list,

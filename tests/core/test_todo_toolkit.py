@@ -20,6 +20,7 @@ def test_todo_update_list_replaces_tasks() -> None:
                 {"name": "Implement feature", "description": "Wire up CLI", "status": "in_progress"},
                 {"name": "Document feature", "status": "todo"},
             ],
+            "override": True,
             "show_todo_list": True,
             "if_match": manager.revision,
         },
@@ -39,6 +40,7 @@ def test_todo_update_list_replaces_tasks() -> None:
                 {"name": "Write examples", "status": "in_progress"},
                 {"name": "Document feature", "status": "todo"},
             ],
+            "override": True,
             "if_match": manager.revision,
         },
     )
@@ -61,12 +63,15 @@ def test_todo_update_list_can_clear_and_use_clear_tool() -> None:
                 {"name": "Write tests", "status": "in_progress"},
                 {"name": "Review fixtures", "status": "todo"},
             ],
+            "override": True,
             "if_match": manager.revision,
         },
     )
     assert len(manager.tasks()) == 2
 
-    cleared = registry.invoke("todo_update_list", {"tasks": [], "if_match": manager.revision})
+    cleared = registry.invoke(
+        "todo_update_list", {"tasks": [], "override": True, "if_match": manager.revision}
+    )
     assert cleared.data["tasks"] == []
     assert manager.tasks() == []
 
@@ -77,6 +82,7 @@ def test_todo_update_list_can_clear_and_use_clear_tool() -> None:
                 {"name": "Lint", "status": "in_progress"},
                 {"name": "Update docs", "status": "todo"},
             ],
+            "override": True,
             "if_match": manager.revision,
         },
     )
@@ -94,7 +100,46 @@ def test_todo_update_list_rejects_single_task_payload() -> None:
             "todo_update_list",
             {
                 "tasks": [{"name": "Inspect file", "status": "todo"}],
+                "override": True,
                 "if_match": manager.revision,
             },
         )
     assert "TODO_SINGLE_ITEM_NOT_ALLOWED" in str(excinfo.value)
+
+
+def test_todo_update_list_appends_when_override_false() -> None:
+    manager = TodoManager()
+    registry = ToolRegistry()
+    registry.add_toolkit(todo_toolkit(manager))
+
+    baseline = registry.invoke(
+        "todo_update_list",
+        {
+            "tasks": [
+                {"name": "Bootstrap project", "status": "in_progress"},
+                {"name": "Ship docs", "status": "todo"},
+            ],
+            "override": True,
+            "if_match": manager.revision,
+        },
+    )
+
+    assert len(baseline.data["tasks"]) == 2
+    initial_revision = manager.revision
+
+    appended = registry.invoke(
+        "todo_update_list",
+        {
+            "tasks": [
+                {"name": "Launch beta", "status": "todo"},
+            ],
+            "override": False,
+            "if_match": initial_revision,
+        },
+    )
+
+    assert len(appended.data["tasks"]) == 3
+    titles = [task["title"] for task in appended.data["tasks"]]
+    assert "Launch beta" in titles
+    statuses = [task["status"] for task in appended.data["tasks"]]
+    assert statuses.count("in_progress") == 1

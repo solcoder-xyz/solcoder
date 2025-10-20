@@ -402,7 +402,7 @@ TODO manager coordinates with agent loop:
 todo_update_list(tasks=[
     {"name": "Write tests", "status": "in_progress"},
     {"name": "Ship docs", "status": "todo"}
-])
+], override=True)
 
 # Loop enforces: if TODO items exist and not acknowledged, 
 # agent must reply with "complete" or use tools first
