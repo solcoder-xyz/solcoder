@@ -27,6 +27,7 @@ from solcoder.core.llm import LLMClient, LLMError, LLMSettings
 from solcoder.session import SessionLoadError, SessionManager
 from solcoder.session.manager import MAX_SESSIONS
 from solcoder.solana import SolanaRPCClient, WalletError, WalletManager
+from datetime import UTC, datetime
 import time
 
 from .app import CLIApp
@@ -321,7 +322,7 @@ def _bootstrap_wallet(
     wallet_manager: WalletManager,
     rpc_client: SolanaRPCClient | None,
     master_passphrase: str | None,
-) -> None:
+) -> datetime | None:
     def _ensure_passphrase(prompt: str = "Enter your SolCoder passphrase") -> str:
         nonlocal master_passphrase
         while not master_passphrase:
@@ -385,7 +386,7 @@ def _bootstrap_wallet(
 
             else:
                 styled_echo("Please choose 'c' (create) or 'r' (restore).")
-        return
+        return None
 
     status = wallet_manager.status()
     if not status.is_unlocked:
@@ -399,6 +400,7 @@ def _bootstrap_wallet(
             if typer.confirm("Stored passphrase didn't unlock the wallet. Enter it manually?", default=True):
                 _prompt_unlock(wallet_manager)
 
+    airdrop_time: datetime | None = None
     # Offer a faucet airdrop on devnet/testnet if balance is 0
     try:
         endpoint = (rpc_client.endpoint if rpc_client else "").lower()
@@ -433,7 +435,7 @@ def _bootstrap_wallet(
                                 continue
                     if sig is None:
                         styled_echo(f"❌ Airdrop failed: {last_err}. Try again later or with a smaller amount.")
-                        return
+                        return None
                     deadline = time.time() + 30.0
                     final_balance = current_balance
                     while time.time() < deadline:
@@ -448,9 +450,12 @@ def _bootstrap_wallet(
                         status_indicator.update("Waiting for airdrop confirmation…")
                 if final_balance is not None:
                     styled_echo(f"✅ Airdrop submitted (sig: {sig}). New balance: {final_balance:.3f} SOL")
+                    airdrop_time = datetime.now(UTC)
                 else:
                     styled_echo("✅ Airdrop submitted. Balance will update shortly.")
+                    airdrop_time = datetime.now(UTC)
 
+    return airdrop_time
 
 def _prepare_llm_client(
     config_manager: ConfigManager,
@@ -633,7 +638,7 @@ def _launch_shell(
     session_manager = SessionManager(root=project_home / "sessions")
     wallet_manager = WalletManager(keys_dir=global_home / "keys")
     rpc_client = SolanaRPCClient(endpoint=config_context.config.rpc_url)
-    _bootstrap_wallet(wallet_manager, rpc_client, config_context.passphrase)
+    airdrop_time = _bootstrap_wallet(wallet_manager, rpc_client, config_context.passphrase)
     resume_id = None if new_session else session
     if resume_id:
         try:
@@ -646,6 +651,14 @@ def _launch_shell(
             session_context = session_manager.start(active_project=str(project_root))
     else:
         session_context = session_manager.start(active_project=str(project_root))
+
+    # Persist bootstrap airdrop timestamp if any
+    if airdrop_time is not None:
+        try:
+            session_context.metadata.last_airdrop_at = airdrop_time
+            session_manager.save(session_context)
+        except Exception:
+            pass
 
     try:
         CLIApp(

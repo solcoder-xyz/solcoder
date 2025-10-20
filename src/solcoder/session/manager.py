@@ -37,6 +37,7 @@ class SessionMetadata(BaseModel):
     wallet_status: str | None = None
     spend_amount: float = 0.0
     wallet_balance: float | None = None
+    last_airdrop_at: datetime | None = None
     llm_input_tokens: int = 0
     llm_output_tokens: int = 0
     llm_last_input_tokens: int = 0

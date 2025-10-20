@@ -14,6 +14,7 @@ from solcoder.core.qr import (
 
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
 from solcoder.solana import WalletError
+from datetime import UTC, datetime
 from solcoder.solana.rpc import SolanaRPCClient
 import time
 
@@ -405,6 +406,12 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             # Update metadata and respond
             status = manager.status()
             app._update_wallet_metadata(status, balance=final_balance)
+            # Record airdrop timestamp
+            try:
+                app.session_context.metadata.last_airdrop_at = datetime.now(UTC)
+                app.session_manager.save(app.session_context)
+            except Exception:
+                pass
             if final_balance is not None and (before is None or final_balance > (before or 0.0)):
                 app.log_event("wallet", f"Airdrop received ({amount:.3f} SOL)")
                 return CommandResponse(
