@@ -335,6 +335,9 @@ class ConfigManager:
         auto_airdrop: bool | None = None,
         auto_airdrop_threshold: float | None = None,
         auto_airdrop_cooldown_secs: int | None = None,
+        auto_airdrop_min_balance: float | None = None,
+        auto_airdrop_amount: float | None = None,
+        airdrop_cooldown_secs: int | None = None,
     ) -> None:
         updates: dict[str, object] = {}
         if max_session_spend is not None:
@@ -345,6 +348,12 @@ class ConfigManager:
             updates["auto_airdrop_threshold"] = float(auto_airdrop_threshold)
         if auto_airdrop_cooldown_secs is not None:
             updates["auto_airdrop_cooldown_secs"] = int(auto_airdrop_cooldown_secs)
+        if auto_airdrop_min_balance is not None:
+            updates["auto_airdrop_min_balance"] = float(auto_airdrop_min_balance)
+        if auto_airdrop_amount is not None:
+            updates["auto_airdrop_amount"] = float(auto_airdrop_amount)
+        if airdrop_cooldown_secs is not None:
+            updates["airdrop_cooldown_secs"] = int(airdrop_cooldown_secs)
         if updates:
             self._update_base_config(**updates)
 

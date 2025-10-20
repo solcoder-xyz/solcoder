@@ -100,6 +100,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     "  send <addr> <amt>   Transfer SOL after confirmation and passphrase check.",
                     "  airdrop [amt]       Request a faucet airdrop on devnet/testnet (default 2 SOL).",
                     "  policy [show|set <cap>|auto <on|off>|threshold <sol>|cooldown <secs>]",
+                    "         min <sol> | amount <sol>",
                 ]
             )
             return CommandResponse(messages=[("system", usage)])
@@ -222,19 +223,22 @@ def register(app: CLIApp, router: CommandRouter) -> None:
 
             config = getattr(app, "config_context", None)
             rpc_url = getattr(getattr(config, "config", None), "rpc_url", "https://api.devnet.solana.com")
-            max_spend = getattr(getattr(config, "config", None), "max_session_spend", None)
-            metadata = app.session_context.metadata
-            if max_spend is not None and max_spend > 0 and (metadata.spend_amount + amount) > max_spend:
+            # Enforce session spend cap
+            exceeds, projected, cap = app._would_exceed_spend_cap(amount)
+            if exceeds:
+                cap_str = f"{cap:.3f} SOL" if cap is not None else "configured limit"
+                proj_str = f"{projected:.3f} SOL" if projected is not None else f"+{amount:.3f} SOL"
                 return CommandResponse(
                     messages=[
                         (
                             "system",
-                            f"Session spend cap exceeded. Attempted {amount:.3f} SOL against limit {max_spend:.3f} SOL.",
+                            f"Session spend cap exceeded. Projected spend {proj_str} exceeds limit {cap_str}.",
                         )
                     ]
                 )
 
             qr_block = _address_qr_block(destination)
+            metadata = app.session_context.metadata
             confirmation_lines = [
                 f"Destination: {destination}",
                 f"Amount: {amount:.3f} SOL",
@@ -328,9 +332,30 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     cooldown = int(float(args_rem[0]))
                     if cooldown < 0:
                         return CommandResponse(messages=[("system", "Cooldown must be zero or positive seconds.")])
-                    cfg_mgr.update_wallet_policy(auto_airdrop_cooldown_secs=cooldown)
+                    cfg_mgr.update_wallet_policy(auto_airdrop_cooldown_secs=cooldown, airdrop_cooldown_secs=cooldown)
                     setattr(cfg_ctx.config, "auto_airdrop_cooldown_secs", cooldown)
+                    setattr(cfg_ctx.config, "airdrop_cooldown_secs", cooldown)
                     return CommandResponse(messages=[("system", f"Airdrop cooldown set to {cooldown} seconds.")])
+
+                if sub == "min":
+                    if not args_rem:
+                        return CommandResponse(messages=[("system", "Usage: /wallet policy min <sol>")])
+                    min_balance = float(args_rem[0])
+                    if min_balance < 0:
+                        return CommandResponse(messages=[("system", "Min balance must be zero or positive.")])
+                    cfg_mgr.update_wallet_policy(auto_airdrop_min_balance=min_balance)
+                    setattr(cfg_ctx.config, "auto_airdrop_min_balance", min_balance)
+                    return CommandResponse(messages=[("system", f"Auto-airdrop min balance set to {min_balance:.3f} SOL.")])
+
+                if sub == "amount":
+                    if not args_rem:
+                        return CommandResponse(messages=[("system", "Usage: /wallet policy amount <sol>")])
+                    amount = float(args_rem[0])
+                    if amount <= 0:
+                        return CommandResponse(messages=[("system", "Airdrop amount must be greater than zero.")])
+                    cfg_mgr.update_wallet_policy(auto_airdrop_amount=amount)
+                    setattr(cfg_ctx.config, "auto_airdrop_amount", amount)
+                    return CommandResponse(messages=[("system", f"Auto-airdrop amount set to {amount:.3f} SOL.")])
 
                 return CommandResponse(messages=[("system", "Usage: /wallet policy [show|set <cap>|auto <on|off>|threshold <sol>|cooldown <secs>]")])
             except ValueError:

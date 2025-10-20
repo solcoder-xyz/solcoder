@@ -376,7 +376,9 @@ class CLIApp:
                     display_cmd = cmd if cmd.startswith("/") else f"/{cmd}"
                     self.log_event("agent", f"Dispatching {display_cmd}")
                     dispatched = self.command_router.dispatch(self, display_cmd[1:])
+                    # Persist dispatched outputs into conversation history so the agent can observe them
                     for role, message in dispatched.messages:
+                        self.context_manager.record(role, message)
                         self._render_message(role, message)
                     # Merge any rendered roles and continue flags conservatively
                     if not dispatched.continue_loop:
@@ -908,6 +910,29 @@ class CLIApp:
                 sys.__stdout__.flush()
         else:
             self._console.print(*objects, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Spend cap helpers
+    # ------------------------------------------------------------------
+    def _would_exceed_spend_cap(self, additional_sol: float) -> tuple[bool, float | None, float | None]:
+        """Return (exceeds, projected_total, cap) for session spend cap.
+
+        If cap is disabled or unavailable, returns (False, projected_total, cap).
+        """
+        try:
+            metadata = self.session_context.metadata
+        except Exception:
+            return False, None, None
+        current = float(getattr(metadata, "spend_amount", 0.0) or 0.0)
+        projected = current + float(additional_sol)
+        cap = None
+        try:
+            cap = float(getattr(self.config_context.config, "max_session_spend", 0.0))
+        except Exception:
+            cap = None
+        if cap is None or cap <= 0:
+            return False, projected, cap
+        return projected > cap, projected, cap
 
     # ------------------------------------------------------------------
     # Wallet auto-airdrop helper

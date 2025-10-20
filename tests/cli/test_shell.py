@@ -216,7 +216,8 @@ def test_status_bar_snapshot_reflects_metadata(
     assert snapshot.agent_mode == "assistive"
     assert snapshot.wallet.startswith("connected")
     assert snapshot.wallet.endswith("✅")
-    assert snapshot.balance == "1.234 SOL"
+    # Balance field now includes spend meter
+    assert snapshot.balance.startswith("1.234 SOL")
     assert snapshot.tokens.startswith("in 1,000 • out 2,000")
     assert snapshot.context.endswith("context free")
     assert snapshot.last_log == "wallet/INFO"
