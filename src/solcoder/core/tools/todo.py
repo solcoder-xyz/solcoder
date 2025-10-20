@@ -1,4 +1,9 @@
-"""TODO management toolset for agent orchestration."""
+"""TODO management toolset for agent orchestration.
+
+The toolkit enforces milestone-focused usage for the shared TODO list. It should
+only be used to manage larger outcomes that benefit from tracking across agent
+turns rather than single micro-actions.
+"""
 
 from __future__ import annotations
 
@@ -53,102 +58,24 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
             rendered_content = manager.render()
         return ToolResult(content=rendered_content, summary=summary, data=data)
 
-    def _create(payload: dict[str, Any]) -> ToolResult:
-        title = payload.get("title")
-        description = payload.get("description")
-        show = _bool_flag(payload, "show_todo_list", default=False)
+    def _update_list(payload: dict[str, Any]) -> ToolResult:
+        tasks_payload = payload.get("tasks")
+        if tasks_payload is None:
+            raise ToolInvocationError("Field 'tasks' is required.")
+        if not isinstance(tasks_payload, list):
+            raise ToolInvocationError("Field 'tasks' must be an array.")
+        show = _bool_flag(payload, "show_todo_list", default=True)
         expected_rev = payload.get("if_match", manager.revision)
         try:
-            task = manager.create_task(title or "", description=description, expected_revision=expected_rev)
+            updated = manager.replace_tasks(tasks_payload, expected_revision=expected_rev)
         except ValueError as exc:
             todo_render = manager.render()
             raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
-        show = _bool_flag(payload, "show_todo_list", default=False) or task.status == "in_progress"
-        return _result(
-            f"Task '{task.title}' added (id: {task.id}).",
-            summary=f"Task added: {task.id}",
-            show=show,
-        )
-
-    def _update(payload: dict[str, Any]) -> ToolResult:
-        task_id = payload.get("task_id")
-        if not task_id:
-            raise ToolInvocationError("Field 'task_id' is required.")
-        fields = {key: payload.get(key) for key in ("title", "description", "status")}
-        show = _bool_flag(payload, "show_todo_list", default=False)
-        if all(value is None for value in fields.values()):
-            raise ToolInvocationError("Provide at least one field to update.")
-        expected_rev = payload.get("if_match", manager.revision)
-        try:
-            task = manager.update_task(
-                task_id,
-                title=fields["title"],
-                description=fields["description"],
-                status=fields["status"],
-                expected_revision=expected_rev,
-            )
-        except ValueError as exc:
-            todo_render = manager.render()
-            raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
-        show = show or fields.get("status") == "in_progress" or task.status == "in_progress"
-        return _result(
-            f"Task '{task.id}' updated.",
-            summary=f"Task updated: {task.id}",
-            show=show,
-        )
-
-    def _complete(payload: dict[str, Any]) -> ToolResult:
-        task_id = payload.get("task_id")
-        if not task_id:
-            raise ToolInvocationError("Field 'task_id' is required.")
-        show = _bool_flag(payload, "show_todo_list", default=False)
-        expected_rev = payload.get("if_match", manager.revision)
-        try:
-            task = manager.mark_complete(task_id, expected_revision=expected_rev)
-        except ValueError as exc:
-            todo_render = manager.render()
-            raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
-        show = True
-        return _result(
-            f"Task '{task.id}' marked complete.",
-            summary=f"Task completed: {task.id}",
-            show=show,
-        )
-
-    def _remove(payload: dict[str, Any]) -> ToolResult:
-        task_id = payload.get("task_id")
-        if not task_id:
-            raise ToolInvocationError("Field 'task_id' is required.")
-        show = _bool_flag(payload, "show_todo_list", default=False)
-        expected_rev = payload.get("if_match", manager.revision)
-        try:
-            manager.remove_task(task_id, expected_revision=expected_rev)
-        except ValueError as exc:
-            todo_render = manager.render()
-            raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
-        show = _bool_flag(payload, "show_todo_list", default=False) or bool(manager.tasks())
-        return _result(
-            f"Task '{task_id}' removed.",
-            summary=f"Task removed: {task_id}",
-            show=show,
-        )
-
-    def _set_active(payload: dict[str, Any]) -> ToolResult:
-        task_id = payload.get("task_id")
-        if not task_id:
-            raise ToolInvocationError("Field 'task_id' is required.")
-        show = True
-        expected_rev = payload.get("if_match", manager.revision)
-        try:
-            task = manager.set_active(task_id, expected_revision=expected_rev)
-        except ValueError as exc:
-            todo_render = manager.render()
-            raise ToolInvocationError(f"{exc}\n\n{todo_render}") from exc
-        return _result(
-            f"Task '{task.id}' is now in progress.",
-            summary=f"Task activated: {task.id}",
-            show=show,
-        )
+        total = len(updated)
+        summary = f"TODO list now has {total} item{'s' if total != 1 else ''}."
+        event = f"TODO list updated ({total} task{'s' if total != 1 else ''})."
+        show = show or total > 0
+        return _result(event, summary=summary, show=show)
 
     def _list_tasks(payload: dict[str, Any]) -> ToolResult:
         show = _bool_flag(payload, "show_todo_list", default=False)
@@ -183,117 +110,59 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
 
     tools = [
         Tool(
-            name="todo_add_task",
-            description="Add a new TODO item for the current task.",
+            name="todo_update_list",
+            description=(
+                "Replace the TODO list with an ordered milestone checklist. "
+                "Keep the list empty or track two or more outcomes, skip micro-steps or TODO management entries, "
+                "and only mark items done after validators/tests succeed."
+            ),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string", "description": "Short label for the task."},
-                    "description": {"type": "string", "description": "Optional details for later reference."},
+                    "tasks": {
+                        "type": "array",
+                        "description": "Ordered tasks to track. Send an empty array to clear the list.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": "Optional existing task id to preserve when reordering.",
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": "Short label for the task (required).",
+                                },
+                                "title": {
+                                    "type": "string",
+                                    "description": "Alias for 'name' to ease transition; prefer 'name'.",
+                                },
+                                "description": {
+                                    "type": "string",
+                                    "description": "Optional additional context for the task.",
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["todo", "in_progress", "done"],
+                                    "description": "Lifecycle state for the task.",
+                                },
+                            },
+                            "required": ["name", "status"],
+                        },
+                    },
                     "show_todo_list": {
                         "type": "boolean",
-                        "description": "Set true to request the CLI render the TODO list.",
+                        "description": "Set true to request the CLI render the TODO list after updating.",
                     },
                     "if_match": {
                         "type": "integer",
                         "description": "Expected TODO revision before applying the change.",
                     },
                 },
-                "required": ["title"],
+                "required": ["tasks"],
             },
             output_schema={"type": "object"},
-            handler=_create,
-        ),
-        Tool(
-            name="todo_update_task",
-            description="Update the title, description, or status of an existing TODO item.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "task_id": {"type": "string", "description": "Identifier of the task to update."},
-                    "title": {"type": "string", "description": "Replacement title for the task."},
-                    "description": {"type": "string", "description": "Replacement description."},
-                    "status": {
-                        "type": "string",
-                        "enum": ["pending", "in_progress", "done"],
-                        "description": "Update the lifecycle stage (pending, in_progress, done).",
-                    },
-                    "show_todo_list": {
-                        "type": "boolean",
-                        "description": "Set true to request the CLI render the TODO list.",
-                    },
-                    "if_match": {
-                        "type": "integer",
-                        "description": "Expected TODO revision before applying the change.",
-                    },
-                },
-                "required": ["task_id"],
-            },
-            output_schema={"type": "object"},
-            handler=_update,
-        ),
-        Tool(
-            name="todo_mark_complete",
-            description="Mark a TODO item as done.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "task_id": {"type": "string", "description": "Identifier of the task to complete."},
-                    "show_todo_list": {
-                        "type": "boolean",
-                        "description": "Set true to request the CLI render the TODO list.",
-                    },
-                    "if_match": {
-                        "type": "integer",
-                        "description": "Expected TODO revision before applying the change.",
-                    },
-                },
-                "required": ["task_id"],
-            },
-            output_schema={"type": "object"},
-            handler=_complete,
-        ),
-        Tool(
-            name="todo_set_active_task",
-            description="Set a TODO item as the single active (in_progress) entry.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "task_id": {"type": "string", "description": "Identifier of the task to activate."},
-                    "show_todo_list": {
-                        "type": "boolean",
-                        "description": "Set true to display the TODO list after activating.",
-                    },
-                    "if_match": {
-                        "type": "integer",
-                        "description": "Expected TODO revision before applying the change.",
-                    },
-                },
-                "required": ["task_id"],
-            },
-            output_schema={"type": "object"},
-            handler=_set_active,
-        ),
-        Tool(
-            name="todo_remove_task",
-            description="Remove a TODO item from the list.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "task_id": {"type": "string", "description": "Identifier of the task to remove."},
-                    "show_todo_list": {
-                        "type": "boolean",
-                        "description": "Set true to request the CLI render the TODO list.",
-                    },
-                    "if_match": {
-                        "type": "integer",
-                        "description": "Expected TODO revision before applying the change.",
-                    },
-                },
-                "required": ["task_id"],
-            },
-            output_schema={"type": "object"},
-            handler=_remove,
+            handler=_update_list,
         ),
         Tool(
             name="todo_list_tasks",
@@ -352,7 +221,10 @@ def todo_toolkit(manager: TodoManager) -> Toolkit:
     return Toolkit(
         name="solcoder.todo",
         version="1.0.0",
-        description="Manage the agent's active TODO items.",
+        description=(
+            "Manage milestone-level TODO items for the agent. Use it to track multi-step deliverables, "
+            "not trivial actions or TODO maintenance tasks."
+        ),
         tools=tools,
     )
 

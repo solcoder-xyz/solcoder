@@ -16,6 +16,7 @@ from .agent import (
     parse_agent_directive,
 )
 from .env_diag import DiagnosticResult, ToolRequirement, collect_environment_diagnostics
+from .exec_ua import build_exec_ua_header, clear_exec_ua_cache
 from .templates import RenderOptions, TemplateError, TemplateExistsError, TemplateNotFoundError, available_templates, render_template
 from .tool_registry import (
     ToolRegistry,
@@ -54,6 +55,8 @@ __all__ = [
     "collect_environment_diagnostics",
     "DiagnosticResult",
     "ToolRequirement",
+    "build_exec_ua_header",
+    "clear_exec_ua_cache",
     "render_template",
     "available_templates",
     "RenderOptions",

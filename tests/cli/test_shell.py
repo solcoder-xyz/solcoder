@@ -255,8 +255,7 @@ def test_chat_message_invokes_llm(
     assert response.continue_loop is True
     assert response.messages and response.messages[0][0] == "agent"
     plan_message = response.messages[0][1]
-    assert "[[RENDER_TODO_PANEL]]" in plan_message
-    assert "Consider the request" in plan_message
+    assert plan_message == "[[RENDER_TODO_PANEL]]"
     assert response.messages[-2][0] == "agent"
     assert "[stub] Completed request" in response.messages[-2][1]
     assert response.messages[-1][0] == "system"
@@ -431,7 +430,14 @@ def test_agent_loop_recovers_from_invalid_json(
     manager, context, wallet_manager, rpc_stub = session_bundle
     script = [
         {"expect": expect_equals("walk me through"), "reply": "not json"},
-        {"expect": expect_contains('"type": "error"'), "reply": {"type": "plan", "message": "Recovered plan", "steps": ["Retry step"]}},
+        {
+            "expect": expect_contains('"type": "error"'),
+            "reply": {
+                "type": "plan",
+                "message": "Recovered plan",
+                "steps": ["Retry step", "Verify outcome"],
+            },
+        },
         {"expect": expect_equals(AGENT_PLAN_ACK), "reply": {"type": "reply", "message": "Recovered"}},
     ]
     llm = ScriptedLLM(script)
@@ -451,11 +457,12 @@ def test_agent_loop_recovers_from_invalid_json(
     assert llm.script == []
     assert any(role == "system" for role, _ in response.messages)
     assert response.messages[0][0] == "agent"
-    assert "[[RENDER_TODO_PANEL]]" in response.messages[0][1]
-    assert "Retry step" in response.messages[0][1]
-    assert response.messages[-2][1].startswith("Recovered")
+    assert response.messages[0][1] == "[[RENDER_TODO_PANEL]]"
+    assert any(role == "agent" and message.startswith("Recovered") for role, message in response.messages)
+    assert response.messages[-2][0] == "system"
+    assert "unfinished items" in response.messages[-2][1]
     assert response.messages[-1][0] == "system"
-    assert "unfinished items" in response.messages[-1][1]
+    assert "invalid directive" in response.messages[-1][1].lower()
     assert any(task.status != "done" for task in app.todo_manager.tasks())
 
 
@@ -484,7 +491,7 @@ def test_agent_loop_reports_invalid_json_twice(
     response = app.handle_line("bad response please")
 
     assert response.messages[-1][0] == "system"
-    assert "failed to provide a valid directive" in response.messages[-1][1]
+    assert "invalid directive" in response.messages[-1][1].lower()
     assert llm.script == []
 def test_quit_command_exits(
     console: Console, session_bundle: tuple[SessionManager, object, WalletManager, RPCStub]

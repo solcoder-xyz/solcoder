@@ -20,6 +20,7 @@ from solcoder.core import (
     AgentToolResult,
     ConfigContext,
     build_tool_manifest,
+    build_exec_ua_header,
     manifest_to_prompt_section,
     parse_agent_directive,
 )
@@ -61,7 +62,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
     manifest = build_tool_manifest(ctx.tool_registry)
     manifest_json = manifest_to_prompt_section(manifest)
-    system_prompt = _agent_system_prompt(ctx.config_context, manifest_json, ctx.todo_manager)
+    exec_ua_header = build_exec_ua_header()
+    system_prompt = _agent_system_prompt(
+        ctx.config_context, manifest_json, exec_ua_header, ctx.todo_manager
+    )
 
     loop_history = list(ctx.history)
     if ctx.initial_todo_message:
@@ -80,12 +84,15 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     retry_payload: str | None = None
     todo_render_revision = -1
     should_exit = False
+    if ctx.todo_manager is not None:
+        ctx.todo_manager.clear_if_all_done()
     preexisting_unfinished = bool(
         ctx.todo_manager and ctx.todo_manager.has_unfinished_tasks()
     )
     plan_added_tasks = False
     llm_log_dir = Path(".solcoder/logs/llm")
     had_invalid_directive = False
+    pending_system_messages: list[str] = []
 
     provider_name, model_name, reasoning_effort = _active_model_details(
         ctx.config_context
@@ -206,7 +213,6 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
     def _bootstrap_plan_into_todo(
         steps: list[str] | None,
-        plan_message: str | None,
         *,
         allow_single_step: bool = False,
     ) -> bool:
@@ -215,12 +221,54 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
         cleaned_steps = [step.strip() for step in steps or [] if step and step.strip()]
         if not cleaned_steps:
             return False
+        trivial_prefixes = {
+            "acknowledge",
+            "cd",
+            "check",
+            "inspect",
+            "list",
+            "open",
+            "print",
+            "run",
+            "show",
+        }
+
+        def _is_milestone(entry: str) -> bool:
+            normalized_step = _todo_normalize_title(entry)
+            if not normalized_step:
+                return False
+            if "todo" in normalized_step and "tool" in normalized_step:
+                return False
+            first_word = normalized_step.split(" ", 1)[0]
+            if first_word in trivial_prefixes:
+                return False
+            trivial_phrases = {
+                "inspect file",
+                "inspect files",
+                "inspect project",
+                "open project folder",
+                "open repository",
+                "run tests",
+                "run pytest",
+                "run npm test",
+                "list files",
+                "check status",
+                "print todo list",
+                "show todo list",
+            }
+            if normalized_step in trivial_phrases:
+                return False
+            return True
+
+        milestone_steps = [step for step in cleaned_steps if _is_milestone(step)]
+        if not milestone_steps:
+            return False
         existing_tasks = ctx.todo_manager.tasks()
-        if len(cleaned_steps) < 2 and not existing_tasks and not allow_single_step:
+        if len(milestone_steps) < 2 and not existing_tasks and not allow_single_step:
             return False
         existing_titles = {_todo_normalize_title(task.title) for task in existing_tasks}
         added = False
-        for step in cleaned_steps:
+        for step in milestone_steps:
             normalized_title = _todo_normalize_title(step)
             if normalized_title in existing_titles:
                 continue
@@ -235,18 +283,7 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
             added = True
         if not existing_tasks and not added:
             return False
-        todo_render = ctx.todo_manager.render()
-        nonlocal todo_render_revision
-        todo_render_revision = ctx.todo_manager.revision
-        plan_text = _format_plan_message(steps or [], plan_message)
-        if plan_text.strip():
-            combined_message = f"{todo_render}\n\n{plan_text}"
-        else:
-            combined_message = todo_render
-        display_messages.append(("agent", combined_message))
-        ctx.render_message("agent", combined_message)
-        rendered_roles.add("agent")
-        return True
+        return added
 
     def _append_active_summary() -> None:
         if ctx.todo_manager is None:
@@ -379,6 +416,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         break
                     logger.warning("Invalid agent directive: %s", exc)
                     had_invalid_directive = True
+                    error_message = "LLM returned an invalid directive. Asking it to retry."
+                    pending_system_messages.append(error_message)
                     retry_payload = json.dumps(
                         {
                             "type": "error",
@@ -404,9 +443,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             else None
                         )
                         plan_received = True
-                        auto_rendered = _bootstrap_plan_into_todo(
+                        _bootstrap_plan_into_todo(
                             directive.steps,
-                            directive.message,
                             allow_single_step=had_invalid_directive,
                         )
                         if (
@@ -416,16 +454,19 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                             and ctx.todo_manager.revision != prev_revision
                         ):
                             plan_added_tasks = True
-                        if not auto_rendered:
+                        tasks_available = bool(
+                            ctx.todo_manager and ctx.todo_manager.tasks()
+                        )
+                        _append_active_summary()
+                        _show_current_todo_panel()
+                        if not tasks_available:
                             plan_text = _format_plan_message(
                                 directive.steps or [], directive.message
                             )
-                            display_messages.append(("agent", plan_text))
-                            ctx.render_message("agent", plan_text)
-                            rendered_roles.add("agent")
-                        _append_active_summary()
-                        if auto_rendered:
-                            _show_current_todo_panel()
+                            if plan_text.strip():
+                                display_messages.append(("agent", plan_text))
+                                ctx.render_message("agent", plan_text)
+                                rendered_roles.add("agent")
                         if directive.steps:
                             status_message = Text(
                                 directive.steps[0], style="solcoder.status.text"
@@ -496,29 +537,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         if ctx.todo_manager is not None
                         else None
                     )
-                    if not _bootstrap_plan_into_todo(
+                    _bootstrap_plan_into_todo(
                         directive.steps,
-                        directive.message,
                         allow_single_step=had_invalid_directive,
-                    ):
-                        plan_text = _format_plan_message(
-                            directive.steps or [], directive.message
-                        )
-                        todo_render = (
-                            ctx.todo_manager.render()
-                            if ctx.todo_manager is not None
-                            else "[[RENDER_TODO_PANEL]]"
-                        )
-                        combined_message = (
-                            f"{todo_render}\n\n{plan_text}"
-                            if plan_text.strip()
-                            else todo_render
-                        )
-                        if ctx.todo_manager is not None:
-                            todo_render_revision = ctx.todo_manager.revision
-                        display_messages.append(("agent", combined_message))
-                        ctx.render_message("agent", combined_message)
-                        rendered_roles.add("agent")
+                    )
                     if (
                         not preexisting_unfinished
                         and ctx.todo_manager is not None
@@ -526,8 +548,17 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         and ctx.todo_manager.revision != prev_revision
                     ):
                         plan_added_tasks = True
+                    tasks_available = bool(ctx.todo_manager and ctx.todo_manager.tasks())
                     _append_active_summary()
                     _show_current_todo_panel()
+                    if not tasks_available:
+                        plan_text = _format_plan_message(
+                            directive.steps or [], directive.message
+                        )
+                        if plan_text.strip():
+                            display_messages.append(("agent", plan_text))
+                            ctx.render_message("agent", plan_text)
+                            rendered_roles.add("agent")
                     if directive.steps:
                         status_message = Text(
                             directive.steps[0], style="solcoder.status.text"
@@ -562,11 +593,13 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
 
                     is_todo_tool = tool_name.startswith("todo_")
 
+                    preview_rendered = False
                     preview = _format_tool_preview(step_title, output)
                     if not is_todo_tool:
                         display_messages.append(("agent", preview))
                         ctx.render_message("agent", preview)
                         rendered_roles.add("agent")
+                        preview_rendered = True
                     _maybe_render_todo(payload_data)
                     _append_active_summary()
                     if is_todo_tool:
@@ -587,9 +620,10 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         status_message = Text("Closing session…", style="solcoder.status.text")
                         status_indicator.update(status_message)
                         farewell = str(payload_data.get("farewell") or "Session closed. Goodbye!")
-                        display_messages.append(("agent", farewell))
-                        ctx.render_message("agent", farewell)
-                        rendered_roles.add("agent")
+                        if not preview_rendered:
+                            display_messages.append(("agent", farewell))
+                            ctx.render_message("agent", farewell)
+                            rendered_roles.add("agent")
                         _append_active_summary()
                         _show_current_todo_panel()
                         _handle_completion_todo()
@@ -675,6 +709,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     if reasoning_effort:
         llm_summary["reasoning_effort"] = reasoning_effort
 
+    for message in pending_system_messages:
+        display_messages.append(("system", message))
+        ctx.render_message("system", message)
+        rendered_roles.add("system")
+
     tool_calls = [llm_summary, *tool_summaries]
     return CommandResponse(
         messages=display_messages,
@@ -702,6 +741,7 @@ def _active_model_details(config_context: ConfigContext | None) -> tuple[str, st
 def _agent_system_prompt(
     config_context: ConfigContext | None,
     manifest_json: str,
+    exec_ua_header: str,
     todo_manager: TodoManager | None = None,
 ) -> str:
     provider_name, model_name, reasoning_effort = _active_model_details(config_context)
@@ -718,28 +758,36 @@ def _agent_system_prompt(
         "Rules:\n"
         "1. If a prompt can be satisfied immediately without tools or multi-step work, respond "
         '   directly with {"type":"reply","message":...}. Otherwise begin with '
-        '{"type":"plan","steps":[...]} describing the intended workflow.\n'
+        '   {"type":"plan","steps":[...]} describing the intended workflow.\n'
         "2. When you need to run a tool, reply with "
         '{"type":"tool_request","step_title":...,"tool":{"name":...,"args":{...}}}. '
         "Keep arguments strictly within the declared schema.\n"
         "3. Once work is complete, respond with "
-        '{"type":"reply","message":...}. Include any final user-facing summary there.\n'
+        '   {"type":"reply","message":...}. Include any final user-facing summary there.\n'
         "4. You may send {'type':'cancel','message':...} if the request cannot be "
         "completed safely.\n"
         "5. After your plan is acknowledged the orchestrator will send "
-        '{"type":"plan_ack","status":"ready"}; treat it as confirmation to continue.\n'
+        '   {"type":"plan_ack","status":"ready"}; treat it as confirmation to continue.\n'
         "6. After the orchestrator sends you tool results, continue the loop using the "
         "latest context until you can emit a final reply.\n"
         "7. Do not invent tools. Only use the manifest provided below.\n"
-        "8. Reach for the TODO tools (todo_add_task, todo_update_task, etc.) when you need to track "
-        "multi-step work. Skip them entirely for quick answers. Reserve generate_plan for long-term "
-        "strategy. When you want the CLI to show the checklist, set show_todo_list=true; otherwise "
-        "leave it out to keep the list hidden.\n"
+        "8. Use todo_update_list when you need to track multi-step work: send the complete ordered checklist "
+        "with each task providing a name and status (todo, in_progress, or done). Skip TODO tools entirely for quick answers. "
+        "Reserve generate_plan for long-term strategy. Set show_todo_list=true when you want the CLI to render the checklist.\n"
         "9. If the user indicates they want to end the conversation or close SolCoder, invoke the "
         "quit tool to terminate the session gracefully, then acknowledge the shutdown with a final reply.\n"
         "10. Every response must be a single JSON object matching the schema above. Non-compliant outputs will be ignored and you will be asked once to retry.\n"
         "11. To run commands or make filesystem changes, you must call execute_shell_command via a tool_request. Never embed raw shell or here-doc snippets in your JSON.\n"
-        "12. Only create new TODO items when they represent genuinely new work. If a task already exists, update or complete it instead of adding a paraphrased duplicate.\n"
+        "12. Each todo_update_list call should include every task you intend to keep; omit entries to remove them and you may reuse ids to preserve history. "
+        "Sending an empty array clears the list. Avoid creating duplicate management tasks or paraphrased duplicates.\n"
+        "TODO Discipline (Policy): Use TODO only for milestone-level outcomes visible to the user. "
+        "Do not create checklist items for trivial sub-steps or for managing the list itself. "
+        "Seed milestones during planning and keep at least two tasks whenever the list is populated. "
+        "Mark tasks done only after validators/tests succeed.\n"
+        "TODO list stability: Use todo_update_list primarily to update statuses or append genuinely new work; avoid reordering or removing existing tasks unless the user or context explicitly requires it.\n"
+        "Review gate: Before completing a TODO item, call an appropriate validate tool to produce evidence that the work succeeded.\n"
+        "Fallback guidance: If a tool is unavailable or fails twice, choose an alternative available tool instead of repeating the same request.\n"
+        "Idempotency requirement: When inserting content into a file, wrap it with begin/end markers (e.g., <!-- BEGIN:ID --> / <!-- END:ID -->) and replace the block if those markers already exist.\n"
     )
 
     active_task = None
@@ -771,6 +819,7 @@ def _agent_system_prompt(
         f"{rules}"
         f"Current configuration: provider={provider_name}, model={model_name}, "
         f"reasoning_effort={reasoning_effort}.\n"
+        f"{exec_ua_header}\n"
         f"Available tools: {manifest_json}\n"
         "During the conversation you may also receive JSON objects with "
         '{"type":"tool_result",...}. Use them to inform the next action.'

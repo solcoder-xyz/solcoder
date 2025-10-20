@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from solcoder.core.exec_ua import build_exec_ua_header
 from solcoder.core.tools.base import Tool, ToolInvocationError, Toolkit, ToolResult
 
 _MAX_PREVIEW_LINES = 6
@@ -75,6 +76,7 @@ def _command_handler(payload: dict[str, Any]) -> ToolResult:
             "returncode": completed.returncode,
             "stdout": stdout,
             "stderr": stderr,
+            "exec_ua": build_exec_ua_header(timeout=timeout_value),
         },
     )
 

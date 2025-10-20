@@ -32,7 +32,7 @@ def _is_management_task(normalized_title: str) -> bool:
     return any(phrase in normalized_title for phrase in phrases)
 
 
-TaskStatus = Literal["pending", "in_progress", "done"]
+TaskStatus = Literal["todo", "in_progress", "done"]
 
 
 @dataclass(slots=True)
@@ -42,7 +42,7 @@ class TodoItem:
     id: str
     title: str
     description: str | None = None
-    status: TaskStatus = "pending"
+    status: TaskStatus = "todo"
     normalized_title: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -159,6 +159,91 @@ class TodoManager:
             self._ensure_active_task()
         self._touch()
 
+    def replace_tasks(
+        self,
+        tasks: Iterable[dict[str, Any]] | None,
+        *,
+        expected_revision: int | None = None,
+    ) -> list[TodoItem]:
+        if self._check_revision(expected_revision):
+            raise ValueError("TODO list has changed. Refresh tasks and retry.")
+
+        payload = list(tasks or [])
+        if not payload:
+            self._tasks.clear()
+            self._counter = itertools.count(1)
+            self._touch()
+            return []
+        if len(payload) == 1:
+            raise ValueError(
+                "TODO_SINGLE_ITEM_NOT_ALLOWED: Provide either zero tasks or two or more milestones."
+            )
+
+        current_max = self._max_numeric_id()
+        seen_ids: set[str] = set()
+        seen_titles: dict[str, TodoItem] = {}
+        in_progress_count = 0
+        new_tasks: list[TodoItem] = []
+
+        for entry in payload:
+            if not isinstance(entry, dict):
+                raise ValueError("Each task must be an object with 'name'/'title' and 'status'.")
+            title = str(entry.get("name") or entry.get("title") or "").strip()
+            if not title:
+                raise ValueError("Task title is required.")
+            normalized_title = _normalize_title(title)
+            if _is_management_task(normalized_title):
+                raise ValueError("Task describes TODO management and was skipped.")
+            description = entry.get("description")
+            description_text = None
+            if description is not None:
+                as_text = str(description).strip()
+                description_text = as_text or None
+            status = self._normalize_status_value(entry.get("status"))
+            if status == "in_progress":
+                in_progress_count += 1
+            existing = seen_titles.get(normalized_title)
+            if existing and existing.status != "done" and status != "done":
+                raise ValueError(f"Task already exists: {existing.id}")
+
+            provided_id = entry.get("id")
+            task_id = str(provided_id).strip() if provided_id is not None else ""
+            if task_id:
+                if task_id in seen_ids:
+                    raise ValueError(f"Duplicate task id '{task_id}'.")
+                seen_ids.add(task_id)
+                if task_id.startswith("T"):
+                    try:
+                        numeric = int(task_id[1:])
+                    except ValueError:
+                        pass
+                    else:
+                        if numeric > current_max:
+                            current_max = numeric
+            else:
+                current_max += 1
+                task_id = f"T{current_max}"
+                seen_ids.add(task_id)
+
+            todo_item = TodoItem(
+                id=task_id,
+                title=title,
+                description=description_text,
+                status=status,
+                normalized_title=normalized_title,
+            )
+            seen_titles[normalized_title] = todo_item
+            new_tasks.append(todo_item)
+
+        if in_progress_count > 1:
+            raise ValueError("Provide at most one task with status 'in_progress'.")
+
+        self._tasks = new_tasks
+        self._counter = itertools.count(current_max + 1)
+        self._normalize_active_state(ensure_active=in_progress_count == 0)
+        self._touch()
+        return list(self._tasks)
+
     def clear(self, *, expected_revision: int | None = None) -> None:
         if self._check_revision(expected_revision):
             raise ValueError("TODO list has changed. Refresh tasks and retry.")
@@ -190,7 +275,7 @@ class TodoManager:
             lines.append(empty_message)
             return "\n".join(lines)
         status_symbols = {
-            "pending": "[ ]",
+            "todo": "[ ]",
             "in_progress": "[>]",
             "done": "[x]",
         }
@@ -280,14 +365,12 @@ class TodoManager:
             description = entry.get("description")
             if description is not None:
                 description = str(description)
-            status = entry.get("status", "pending")
-            if status not in ("pending", "in_progress", "done"):
-                status = "pending"
+            status = self._normalize_status_value(entry.get("status"))
             todo_item = TodoItem(
                 id=task_id,
                 title=title,
                 description=description,
-                status=status,  # type: ignore[arg-type]
+                status=status,
                 normalized_title=normalized,
             )
             tasks.append(todo_item)
@@ -303,11 +386,12 @@ class TodoManager:
         self.revision = int(state.get("revision", len(tasks)))
         self._acknowledged = bool(state.get("acknowledged", False))
         self._last_revision_mismatch = False
-        self._normalize_active_state()
+        ensure_active = not any(task.status == "in_progress" for task in tasks)
+        self._normalize_active_state(ensure_active=ensure_active)
 
     def _apply_status(self, task: TodoItem, status: TaskStatus) -> None:
-        if status not in ("pending", "in_progress", "done"):
-            raise ValueError("Task status must be 'pending', 'in_progress', or 'done'.")
+        if status not in ("todo", "in_progress", "done"):
+            raise ValueError("Task status must be 'todo', 'in_progress', or 'done'.")
         if status == task.status:
             return
         if status == "in_progress":
@@ -318,7 +402,7 @@ class TodoManager:
             task.status = "done"
             self._ensure_active_task()
         else:
-            task.status = "pending"
+            task.status = "todo"
             self._ensure_active_task()
 
     def _set_active_task(self, task: TodoItem) -> None:
@@ -326,26 +410,26 @@ class TodoManager:
             raise ValueError("Completed tasks cannot be set active.")
         for other in self._tasks:
             if other.id != task.id and other.status == "in_progress":
-                other.status = "pending"
+                other.status = "todo"
         task.status = "in_progress"
 
     def _ensure_active_task(self) -> None:
         if any(task.status == "in_progress" for task in self._tasks if task.status != "done"):
             return
         for task in self._tasks:
-            if task.status == "pending":
+            if task.status == "todo":
                 task.status = "in_progress"
                 break
 
-    def _normalize_active_state(self) -> None:
+    def _normalize_active_state(self, *, ensure_active: bool = True) -> None:
         active_found = False
         for task in self._tasks:
             if task.status == "in_progress":
                 if active_found:
-                    task.status = "pending"
+                    task.status = "todo"
                 else:
                     active_found = True
-        if not active_found:
+        if not active_found and ensure_active and self._tasks:
             self._ensure_active_task()
 
     def active_task(self) -> TodoItem | None:
@@ -358,6 +442,42 @@ class TodoManager:
     def active_task_id(self) -> str | None:
         active = self.active_task()
         return active.id if active else None
+
+    def _max_numeric_id(self) -> int:
+        max_index = 0
+        for task in self._tasks:
+            if task.id.startswith("T"):
+                try:
+                    numeric = int(task.id[1:])
+                except ValueError:
+                    continue
+                if numeric > max_index:
+                    max_index = numeric
+        return max_index
+
+    @staticmethod
+    def _normalize_status_value(value: Any) -> TaskStatus:
+        if value is None:
+            return "todo"
+        raw = str(value).strip().lower()
+        if not raw:
+            return "todo"
+        if raw in {"todo", "pending", "backlog"}:
+            return "todo"
+        if raw in {"in_progress", "in progress", "in-progress", "active", "progress"}:
+            return "in_progress"
+        if raw in {"done", "complete", "completed", "finished"}:
+            return "done"
+        raise ValueError("Task status must be 'todo', 'in_progress', or 'done'.")
+
+    def clear_if_all_done(self) -> bool:
+        """Clear the list when every tracked task is already complete."""
+        if not self._tasks:
+            return False
+        if any(task.status != "done" for task in self._tasks):
+            return False
+        self.clear()
+        return True
 
 
 def serialize_tasks(tasks: Iterable[TodoItem]) -> list[dict[str, Any]]:
