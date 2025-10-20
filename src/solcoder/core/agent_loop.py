@@ -657,10 +657,14 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         payload_data = None
 
                     is_todo_tool = tool_name.startswith("todo_")
+                    suppress_preview = False
+                    if isinstance(payload_data, dict):
+                        raw_flag = payload_data.get("suppress_preview")
+                        suppress_preview = bool(raw_flag) if raw_flag is not None else False
 
                     preview_rendered = False
-                    preview = _format_tool_preview(step_title, output)
-                    if not is_todo_tool:
+                    if not is_todo_tool and not suppress_preview:
+                        preview = _format_tool_preview(step_title, output)
                         display_messages.append(("agent", preview))
                         ctx.render_message("agent", preview)
                         rendered_roles.add("agent")
@@ -678,7 +682,19 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     }
                     if payload_data is not None:
                         summary_entry["data"] = payload_data
+                    # Include dispatch command hint if provided by the tool
+                    if isinstance(payload_data, dict):
+                        cmd = payload_data.get("dispatch_command")
+                        if isinstance(cmd, str) and cmd.strip():
+                            summary_entry["dispatch_command"] = cmd
                     tool_summaries.append(summary_entry)
+
+                    # Collect any dispatchable commands from tools for the CLI to run
+                    dispatch_calls: list[str] = []
+                    if isinstance(payload_data, dict):
+                        cmd = payload_data.get("dispatch_command")
+                        if isinstance(cmd, str) and cmd.strip():
+                            dispatch_calls.append(cmd)
 
                     if isinstance(payload_data, dict) and payload_data.get("exit_app"):
                         should_exit = True
@@ -702,8 +718,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         output=output,
                         data=payload_data,
                     )
+                    payload_json = tool_payload.model_dump(mode="json", exclude_none=True)
+                    if dispatch_calls:
+                        payload_json["dispatch_commands"] = dispatch_calls
                     pending_prompt = json.dumps(
-                        tool_payload.model_dump(mode="json", exclude_none=True),
+                        payload_json,
                         ensure_ascii=False,
                         default=str,
                     )

@@ -27,6 +27,7 @@ from solcoder.core.llm import LLMClient, LLMError, LLMSettings
 from solcoder.session import SessionLoadError, SessionManager
 from solcoder.session.manager import MAX_SESSIONS
 from solcoder.solana import SolanaRPCClient, WalletError, WalletManager
+import time
 
 from .app import CLIApp
 from .template_utils import parse_template_tokens
@@ -397,6 +398,58 @@ def _bootstrap_wallet(
         else:
             if typer.confirm("Stored passphrase didn't unlock the wallet. Enter it manually?", default=True):
                 _prompt_unlock(wallet_manager)
+
+    # Offer a faucet airdrop on devnet/testnet if balance is 0
+    try:
+        endpoint = (rpc_client.endpoint if rpc_client else "").lower()
+    except Exception:
+        endpoint = ""
+    is_test_cluster = ("devnet" in endpoint) or ("testnet" in endpoint)
+    if rpc_client is not None and status.public_key and is_test_cluster:
+        try:
+            current_balance = rpc_client.get_balance(status.public_key)
+        except Exception:
+            current_balance = None
+        if not current_balance or current_balance <= 0:
+            if typer.confirm("No SOL found. Request 2 SOL airdrop now?", default=True):
+                amount = 2.0
+                with CLI_CONSOLE.status(f"Requesting {amount:.3f} SOL airdrop…", spinner="dots") as status_indicator:
+                    # Retry a few times on faucet/internal errors
+                    attempts = 3
+                    delay = 2.0
+                    sig = None
+                    last_err = None
+                    for i in range(attempts):
+                        try:
+                            sig = rpc_client.request_airdrop(status.public_key, amount)
+                            last_err = None
+                            break
+                        except Exception as exc:  # noqa: BLE001
+                            last_err = exc
+                            if i < attempts - 1:
+                                status_indicator.update("Faucet busy; retrying shortly…")
+                                time.sleep(delay)
+                                delay *= 1.5
+                                continue
+                    if sig is None:
+                        styled_echo(f"❌ Airdrop failed: {last_err}. Try again later or with a smaller amount.")
+                        return
+                    deadline = time.time() + 30.0
+                    final_balance = current_balance
+                    while time.time() < deadline:
+                        time.sleep(1.0)
+                        try:
+                            now = rpc_client.get_balance(status.public_key)
+                        except Exception:
+                            continue
+                        final_balance = now
+                        if (current_balance is None) or (now > (current_balance or 0.0)):
+                            break
+                        status_indicator.update("Waiting for airdrop confirmation…")
+                if final_balance is not None:
+                    styled_echo(f"✅ Airdrop submitted (sig: {sig}). New balance: {final_balance:.3f} SOL")
+                else:
+                    styled_echo("✅ Airdrop submitted. Balance will update shortly.")
 
 
 def _prepare_llm_client(

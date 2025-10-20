@@ -14,6 +14,8 @@ from solcoder.core.qr import (
 
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
 from solcoder.solana import WalletError
+from solcoder.solana.rpc import SolanaRPCClient
+import time
 
 if TYPE_CHECKING:  # pragma: no cover
     from solcoder.cli.app import CLIApp
@@ -91,6 +93,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     "  export [path]       Export secret key (optionally to file).",
                     "  phrase              Display recovery mnemonic (requires passphrase).",
                     "  send <addr> <amt>   Transfer SOL after confirmation and passphrase check.",
+                    "  airdrop [amt]       Request a faucet airdrop on devnet/testnet (default 2 SOL).",
                 ]
             )
             return CommandResponse(messages=[("system", usage)])
@@ -259,6 +262,96 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 response_lines.append(f"Wallet balance: {wallet_balance:.3f} SOL")
             return CommandResponse(messages=[("system", "\n".join(response_lines))])
 
+        if command == "airdrop":
+            status = manager.status()
+            if not status.exists or not status.public_key:
+                return CommandResponse(messages=[("system", "No wallet available. Create or restore one first.")])
+
+            cfg = getattr(app, "config_context", None)
+            network = getattr(getattr(cfg, "config", None), "network", "devnet")
+            rpc_url = getattr(getattr(cfg, "config", None), "rpc_url", "https://api.devnet.solana.com")
+            if str(network).lower() not in {"devnet", "testnet"}:
+                return CommandResponse(messages=[("system", "Airdrop is only available on devnet or testnet.")])
+
+            try:
+                amount = float(rest[0]) if rest else 2.0
+            except ValueError:
+                return CommandResponse(messages=[("system", "Amount must be numeric (SOL).")])
+            if amount <= 0:
+                return CommandResponse(messages=[("system", "Amount must be greater than zero.")])
+
+            rpc_client = app.rpc_client or SolanaRPCClient(endpoint=rpc_url)
+            # If we created a fallback client, persist it so subsequent calls use it
+            if app.rpc_client is None:
+                app.rpc_client = rpc_client
+            address = status.public_key
+            # Use the resolved rpc_client to fetch balances (not app._fetch_balance)
+            try:
+                before = rpc_client.get_balance(address)
+            except Exception:  # noqa: BLE001
+                before = None
+
+            # Show spinner while waiting for airdrop to land
+            with app.console.status(f"Requesting {amount:.3f} SOL airdrop…", spinner="dots") as _status:
+                # Retry transient faucet errors with simple backoff
+                attempts = 3
+                delay = 2.0
+                last_err: Exception | None = None
+                sig: str | None = None
+                for i in range(attempts):
+                    try:
+                        sig = rpc_client.request_airdrop(address, amount)
+                        last_err = None
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        last_err = exc
+                        if i < attempts - 1:
+                            _status.update("Faucet busy; retrying shortly…")
+                            time.sleep(delay)
+                            delay *= 1.5
+                            continue
+                if sig is None:
+                    app.log_event("wallet", f"Airdrop failed: {last_err}", severity="error")
+                    hint = "Faucet may be rate-limited. Try again in ~30s or reduce the amount."
+                    return CommandResponse(messages=[("system", f"Airdrop failed: {last_err}\n{hint}")])
+
+                # Poll balance until it increases or timeout
+                deadline = time.time() + 30.0
+                final_balance = before
+                while time.time() < deadline:
+                    time.sleep(1.0)
+                    try:
+                        current = rpc_client.get_balance(address)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    final_balance = current
+                    if before is None or current > (before or 0.0):
+                        break
+                    _status.update("Waiting for airdrop confirmation…")
+
+            # Update metadata and respond
+            status = manager.status()
+            app._update_wallet_metadata(status, balance=final_balance)
+            if final_balance is not None and (before is None or final_balance > (before or 0.0)):
+                app.log_event("wallet", f"Airdrop received ({amount:.3f} SOL)")
+                return CommandResponse(
+                    messages=[
+                        (
+                            "system",
+                            f"Airdrop submitted (sig: {sig}). New balance: {final_balance:.3f} SOL",
+                        )
+                    ]
+                )
+            app.log_event("wallet", "Airdrop submitted; balance unchanged yet", severity="warning")
+            return CommandResponse(
+                messages=[
+                    (
+                        "system",
+                        f"Airdrop submitted (sig: {sig}). Balance may update shortly.",
+                    )
+                ]
+            )
+
         app.log_event("wallet", f"Unknown wallet command '{command}'", severity="warning")
         return CommandResponse(
             messages=[
@@ -273,7 +366,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         SlashCommand(
             "wallet",
             handle,
-            "Wallet management: status | address | create | restore | unlock | lock | export | phrase | send",
+            "Wallet management: status | address | create | restore | unlock | lock | export | phrase | send | airdrop",
         )
     )
 

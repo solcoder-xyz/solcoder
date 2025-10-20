@@ -66,3 +66,44 @@ class SolanaRPCClient:
         balance = lamports / LAMPORTS_PER_SOL
         logger.debug("Fetched balance %.9f SOL for %s", balance, public_key)
         return balance
+
+    def request_airdrop(self, public_key: str, amount_sol: float) -> str:
+        """Request an airdrop of `amount_sol` SOL to `public_key`.
+
+        Returns the transaction signature.
+        """
+        if amount_sol <= 0:
+            raise SolanaRPCError("Airdrop amount must be positive")
+
+        lamports = int(amount_sol * LAMPORTS_PER_SOL)
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "requestAirdrop",
+            "params": [public_key, lamports],
+        }
+        response = self._request(self.endpoint, json=payload, timeout=self.timeout)  # type: ignore[arg-type]
+        try:
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise SolanaRPCError(f"RPC request failed: {exc}") from exc
+
+        try:
+            data = response.json()
+        except ValueError as exc:  # pragma: no cover - unexpected for compliant RPC
+            raise SolanaRPCError("Invalid JSON in RPC response") from exc
+
+        if "error" in data:
+            message = data["error"].get("message", "Unknown RPC error")
+            raise SolanaRPCError(message)
+
+        try:
+            signature = data["result"]
+        except KeyError as exc:
+            raise SolanaRPCError("Malformed RPC response; missing airdrop signature") from exc
+
+        if not isinstance(signature, str) or not signature:
+            raise SolanaRPCError("Airdrop signature missing or invalid")
+
+        logger.debug("Requested airdrop of %.3f SOL for %s (sig=%s)", amount_sol, public_key, signature)
+        return signature

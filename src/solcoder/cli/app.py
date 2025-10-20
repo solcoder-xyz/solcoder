@@ -361,6 +361,27 @@ class CLIApp:
         for idx, (role, message) in enumerate(response.messages):
             tool_calls = response.tool_calls if idx == 0 else None
             self.context_manager.record(role, message, tool_calls=tool_calls)
+        # If any tool requested a CLI command dispatch (e.g., start /wallet send ...), run it now
+        try:
+            if response.tool_calls:
+                for call in response.tool_calls:
+                    if not isinstance(call, dict):
+                        continue
+                    cmd = call.get("dispatch_command")
+                    if not isinstance(cmd, str) or not cmd.strip():
+                        continue
+                    # Ensure leading '/'
+                    display_cmd = cmd if cmd.startswith("/") else f"/{cmd}"
+                    self.log_event("agent", f"Dispatching {display_cmd}")
+                    dispatched = self.command_router.dispatch(self, display_cmd[1:])
+                    for role, message in dispatched.messages:
+                        self._render_message(role, message)
+                    # Merge any rendered roles and continue flags conservatively
+                    if not dispatched.continue_loop:
+                        response.continue_loop = False
+        except Exception:  # noqa: BLE001
+            logger.debug("Failed to dispatch tool-requested command", exc_info=True)
+
         self.context_manager.compact_history_if_needed()
         self._persist()
         self._refresh_status_bar()

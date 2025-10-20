@@ -8,6 +8,7 @@ from .knowledge import knowledge_toolkit
 from .plan import plan_toolkit
 from .review import review_toolkit
 from .session import session_toolkit
+from .wallet import wallet_toolkit
 
 DEFAULT_TOOLKIT_FACTORIES = [
     plan_toolkit,
@@ -18,6 +19,7 @@ DEFAULT_TOOLKIT_FACTORIES = [
     knowledge_toolkit,
     session_toolkit,
     command_toolkit,
+    wallet_toolkit,
 ]
 
 __all__ = ["DEFAULT_TOOLKIT_FACTORIES"]
