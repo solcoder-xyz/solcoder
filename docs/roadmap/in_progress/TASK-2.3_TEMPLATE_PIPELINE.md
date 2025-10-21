@@ -37,6 +37,22 @@ Connect templates to user prompts so `/new "<prompt>"` selects an Anchor bluepri
   - PDAs: escrow by initializer (and optional vault ATA)
   - Notes: highlight authority checks and cancel path
 
+### Blueprint Keys and Selection
+- Introduce canonical blueprint keys: `counter`, `token`, `nft`, `registry`, `escrow`.
+- `/new <key>` must directly select the matching blueprint without heuristics.
+- If the user runs `/new <free-form text>` that is not an exact key:
+  - Do not run local heuristics.
+  - Ask the LLM to choose a blueprint with a minimal system prompt, no transcript/history, and provide the list of available keys and short descriptions.
+  - If the LLM cannot decide (or returns invalid), prompt the user interactively to choose.
+  - After selection, proceed with normal rendering flow and show the confirmation/summary.
+
+### Layout & Registry
+- Store all blueprints under `solaba/blueprints/` (top-level folder), one subfolder per key.
+- Maintain a simple blueprint registry (e.g., `solaba/blueprints/registry.json`) with:
+  - `key`, `name`, `description`, `path`, `tags`, and `required_tools` fields.
+  - Used by `/new` to list available options and by the LLM selection prompt.
+- Keep `RenderOptions` compatible and map registry entries to renderer inputs.
+
 ## Key Steps
 1. Design mapping heuristics and optional `--template` override flags.
 2. Implement rendering pipeline with conflict detection (prompt user before overwriting).
