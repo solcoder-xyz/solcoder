@@ -89,6 +89,15 @@ Connect templates to user prompts so `/new "<prompt>"` selects an Anchor bluepri
 - Counter wizard:
   - Optional initial value; otherwise accept defaults
 
+### End-of-Flow Handoff to Agent
+- After a blueprint is selected and the wizard collects answers, the CLI compiles a structured payload containing:
+  - `blueprint_key` (one of: counter, token, nft, registry, escrow)
+  - `answers` (key/value map from the wizard, validated against the blueprint schema)
+  - `target_dir` (the destination directory for generated files)
+- Default `target_dir` is the workspace root; the user can override via `--dir <path>` or a wizard prompt.
+- The CLI then asks the agent to create the blueprint files according to this payload (concise system prompt without full history), and waits for completion.
+- Upon success, the CLI registers the created path as the active project and prints a summary plus next steps (e.g., `/deploy`, `/program inspect`).
+
 ## Key Steps
 1. Design mapping heuristics and optional `--template` override flags.
 2. Implement rendering pipeline with conflict detection (prompt user before overwriting).
