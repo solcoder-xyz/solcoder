@@ -5,6 +5,8 @@
 ## Objective
 Provide a first‑class command to initialize an Anchor workspace so users can immediately scaffold programs with `/new` and deploy in the same session.
 
+_Done — 2025-10-21 (CLI agent)_
+
 ## Command
 `/init [DIRECTORY] [--name <workspace_name>] [--force] [--offline]`
 
@@ -55,4 +57,3 @@ Provide a first‑class command to initialize an Anchor workspace so users can i
 - Running `/init` in a fresh directory creates an Anchor workspace (via `anchor init` if available, otherwise offline scaffold), sets active project, and prints next steps.
 - `/init ./workspace` works with relative/absolute paths; on existing workspaces it is a no‑op with a helpful message.
 - Behavior is Windows/macOS‑friendly; no crashes on chmod or missing tools.
-
