@@ -304,6 +304,9 @@ class CLIApp:
         balance = metadata.wallet_balance
         if balance is not None:
             lines.append(f"[#14F195]💰 Balance[/]: [#E6FFFA]{balance:.3f} SOL")
+        # Quick tips
+        lines.append("[#94A3B8]Tip:[/] Use `/init` to initialize an Anchor workspace here.")
+        lines.append("[#94A3B8]Help:[/] Type `/help` to see all commands.")
         welcome_text = Text.from_markup("\n".join(lines))
         self.console.print(
             Panel(

@@ -128,34 +128,35 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 ]
             )
 
-        # Prefer anchor CLI if available and not offline, creating the directory if necessary
-        if not offline and shutil.which("anchor") is not None:
-            parent = target.parent if not target.exists() else target
-            create_in_parent = not target.exists()
-            project_name = name
-            try:
-                if create_in_parent:
-                    parent.mkdir(parents=True, exist_ok=True)
-                    # Run `anchor init <name>` in parent, which creates <name>/
-                    cmd = ["anchor", "init", project_name]
-                    result = subprocess.run(cmd, cwd=str(parent), capture_output=True, text=True, check=False)
-                    if result.returncode != 0:
-                        err = result.stderr.strip() or result.stdout.strip() or "anchor init failed"
-                        return CommandResponse(messages=[("system", f"Anchor init failed: {err}")])
-                    workspace_root = parent / project_name
-                else:
-                    # Directory exists; scaffold offline to avoid anchor refusing to overwrite
-                    _offline_scaffold(target, name=project_name, force=force)
-                    workspace_root = target
-            except FileExistsError as exc:
-                return CommandResponse(messages=[("system", str(exc))])
-        else:
-            # Offline scaffold path
-            try:
-                _offline_scaffold(target, name=name, force=force)
-            except FileExistsError as exc:
-                return CommandResponse(messages=[("system", str(exc))])
-            workspace_root = target
+        # Perform initialization with a spinner for better UX
+        with app.console.status("Initializing Anchor workspace…", spinner="dots"):
+            if not offline and shutil.which("anchor") is not None:
+                parent = target.parent if not target.exists() else target
+                create_in_parent = not target.exists()
+                project_name = name
+                try:
+                    if create_in_parent:
+                        parent.mkdir(parents=True, exist_ok=True)
+                        # Run `anchor init <name>` in parent, which creates <name>/
+                        cmd = ["anchor", "init", project_name]
+                        result = subprocess.run(cmd, cwd=str(parent), capture_output=True, text=True, check=False)
+                        if result.returncode != 0:
+                            err = result.stderr.strip() or result.stdout.strip() or "anchor init failed"
+                            return CommandResponse(messages=[("system", f"Anchor init failed: {err}")])
+                        workspace_root = parent / project_name
+                    else:
+                        # Directory exists; scaffold offline to avoid anchor refusing to overwrite
+                        _offline_scaffold(target, name=project_name, force=force)
+                        workspace_root = target
+                except FileExistsError as exc:
+                    return CommandResponse(messages=[("system", str(exc))])
+            else:
+                # Offline scaffold path
+                try:
+                    _offline_scaffold(target, name=name, force=force)
+                except FileExistsError as exc:
+                    return CommandResponse(messages=[("system", str(exc))])
+                workspace_root = target
 
         # Persist active project and return summary
         app.session_context.metadata.active_project = str(workspace_root)
@@ -179,4 +180,3 @@ def register(app: CLIApp, router: CommandRouter) -> None:
 
 
 __all__ = ["register"]
-
