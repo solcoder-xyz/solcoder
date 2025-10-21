@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "programs/{{PROGRAM_NAME_SNAKE}}",
+]
+

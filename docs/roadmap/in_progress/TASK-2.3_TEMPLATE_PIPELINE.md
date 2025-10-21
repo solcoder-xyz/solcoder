@@ -47,15 +47,15 @@ Connect templates to user prompts so `/new "<prompt>"` selects an Anchor bluepri
   - After selection, proceed with normal rendering flow and show the confirmation/summary.
 
 ### Layout & Registry
-- Store all blueprints under `solaba/blueprints/` (top-level folder), one subfolder per key.
-- Maintain a simple blueprint registry (e.g., `solaba/blueprints/registry.json`) with:
+- Store all blueprints under `src/solcoder/anchor/blueprints/`, one subfolder per key.
+- Maintain a simple blueprint registry (e.g., `src/solcoder/anchor/blueprints/registry.json`) with:
   - `key`, `name`, `description`, `path`, `tags`, and `required_tools` fields.
   - Used by `/new` to list available options and by the LLM selection prompt.
 - Keep `RenderOptions` compatible and map registry entries to renderer inputs.
 
 ### Wizard Mode (Interactive Config)
 - If the user invokes `/new <key>` directly (e.g., `/new token`), start a per‑blueprint wizard that asks the minimum set of config questions and then renders.
-- All wizard questions and defaults must be stored with the blueprint under `solaba/blueprints/<key>/` (e.g., `wizard.json` or `options.schema.json`) so the CLI does not hardcode content.
+- All wizard questions and defaults must be stored with the blueprint under `src/solcoder/anchor/blueprints/<key>/` (e.g., `wizard.json` or `options.schema.json`) so the CLI does not hardcode content.
 - The wizard engine:
   - Loads the question list + validation from the blueprint bundle.
   - Prompts in the CLI with sane defaults; supports `--no-wizard` to skip and use flags/defaults.

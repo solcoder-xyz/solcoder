@@ -11,6 +11,7 @@ from .session import session_toolkit
 from .wallet import wallet_toolkit
 from .program import program_toolkit
 from .workspace import workspace_toolkit
+from .blueprint import blueprint_toolkit
 
 DEFAULT_TOOLKIT_FACTORIES = [
     plan_toolkit,
@@ -24,6 +25,7 @@ DEFAULT_TOOLKIT_FACTORIES = [
     wallet_toolkit,
     program_toolkit,
     workspace_toolkit,
+    blueprint_toolkit,
 ]
 
 __all__ = ["DEFAULT_TOOLKIT_FACTORIES"]

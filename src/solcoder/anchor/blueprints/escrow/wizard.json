@@ -1,0 +1,7 @@
+{
+  "questions": [
+    {"key": "program_name", "prompt": "Program name", "default": "escrow", "pattern": "^[a-zA-Z0-9_-]+$"},
+    {"key": "mint", "prompt": "Token mint (optional)", "default": ""}
+  ]
+}
+

@@ -30,6 +30,9 @@ class RenderOptions:
     program_id: str = "replace-with-program-id"
     cluster: str = "devnet"
     overwrite: bool = False
+    # Optional absolute/relative path to the template root directory.
+    # When provided, this path takes precedence over the default templates/ lookup.
+    template_path: Path | None = None
 
 
 _TEMPLATE_ROOT = Path(__file__).resolve().parents[3] / "templates"
@@ -42,7 +45,7 @@ def available_templates() -> list[str]:
 
 
 def render_template(options: RenderOptions) -> Path:
-    template_dir = _TEMPLATE_ROOT / options.template
+    template_dir = options.template_path or (_TEMPLATE_ROOT / options.template)
     if not template_dir.exists():
         raise TemplateNotFoundError(f"Template '{options.template}' not found.")
 

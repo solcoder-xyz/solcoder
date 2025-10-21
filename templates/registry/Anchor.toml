@@ -1,0 +1,8 @@
+[workspace]
+
+[provider]
+cluster = "{{CLUSTER}}"
+
+[programs.{{CLUSTER}}]
+{{PROGRAM_NAME_SNAKE}} = "{{PROGRAM_ID}}"
+
