@@ -958,8 +958,16 @@ class CLIApp:
         if cooldown is None:
             cooldown = getattr(cfg, "auto_airdrop_cooldown_secs", 30)
         auto = bool(getattr(cfg, "auto_airdrop", True))
+        # Ensure RPC client is initialized before fetching balance
+        rpc_url = getattr(cfg, "rpc_url", "https://api.devnet.solana.com")
+        rpc_client = self.rpc_client or SolanaRPCClient(endpoint=rpc_url)
+        if self.rpc_client is None:
+            self.rpc_client = rpc_client
         # Current balance
-        balance = self._fetch_balance(status.public_key)
+        try:
+            balance = rpc_client.get_balance(status.public_key)
+        except Exception:
+            balance = None
         if balance is None or balance >= float(min_balance or 0.0):
             return
         # Cooldown check
@@ -981,10 +989,6 @@ class CLIApp:
         if not should_airdrop:
             return
         # Execute airdrop with retry/backoff and poll for update
-        rpc_url = getattr(cfg, "rpc_url", "https://api.devnet.solana.com")
-        rpc_client = self.rpc_client or SolanaRPCClient(endpoint=rpc_url)
-        if self.rpc_client is None:
-            self.rpc_client = rpc_client
         address = status.public_key
         before = balance
         with self.console.status(f"Auto-airdrop {amount:.3f} SOL…", spinner="dots") as status_indicator:

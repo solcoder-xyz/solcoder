@@ -5,6 +5,8 @@
 ## Objective
 Add a CLI command and agent tool to interact with on-chain programs by program ID: inspect instructions, prompt for args/accounts, and build + send transactions with explicit user confirmation.
 
+_Done — 2025-10-21 (CLI agent)_
+
 ## Deliverables
 - New CLI command `/program` (aliases: `/dapp`, `/interact`).
   - `inspect <program_id>` — fetch IDL (Anchor) or use SPL catalog; list instructions with args and required accounts (signer/writable flags).
@@ -45,3 +47,36 @@ Add a CLI command and agent tool to interact with on-chain programs by program I
 - Solana engineer (Anchor/IDL client, SPL catalog).
 - CLI engineer (command UX, summary/confirmation).
 - QA (mocked RPC/IDL tests, devnet smoke test).
+
+## Manual Tests (Devnet)
+- Candidate Anchor programs with public IDLs (verify at runtime; IDs may rotate):
+  - Metaplex Candy Machine v2 (Anchor)
+  - Switchboard v2 (Anchor)
+  - Drift v2, Mango v4, Zeta, Quarry (Anchor DeFi)
+  - Tip: avoid hardcoding IDs; probe availability first.
+
+- Probe for an on-chain IDL
+  - CLI: `anchor idl fetch <PROGRAM_ID>` should print JSON if found.
+  - Python (anchorpy):
+    - `from anchorpy import Provider, Program`
+    - `provider = await Provider.create(...)`
+    - `program = await Program.at(PROGRAM_ID, provider)`
+    - `idl = program.idl`
+
+- Env-driven candidates for tests/demos
+  - Set `SOLCODER_TEST_ANCHOR_PROGRAM_IDS="id1,id2,id3"` and pick the first that resolves.
+  - If none resolves, skip the Anchor path and fall back to SPL catalog tests.
+
+- Manual flow (Anchor path)
+  1) `solcoder` on devnet; ensure wallet funded (use `/wallet airdrop 1`).
+  2) `/program inspect <program_id>` → lists instructions, args, accounts (signer/writable).
+  3) `/program wizard <program_id>` → choose a low-risk instruction, fill args/accounts, preview, confirm.
+  4) Observe signature and status bar balance update.
+
+- Manual flow (SPL fallback)
+  1) Use known SPLs when no IDL exists: Token, Token-2022, Associated Token, Memo, Metaplex Metadata.
+  2) `/program inspect <token_program_id>` → shows known instruction schemas from catalog.
+  3) `/program wizard <token_program_id>` → try a safe op (e.g., create associated token account) with airdropped SOL.
+
+- Raw mode
+  - If neither IDL nor SPL catalog applies, paste an IDL JSON via `/program idl import` or provide Borsh schemas in raw mode, then repeat inspect/call.

@@ -322,9 +322,14 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     threshold = float(args_rem[0])
                     if threshold < 0:
                         return CommandResponse(messages=[("system", "Threshold must be zero or positive.")])
-                    cfg_mgr.update_wallet_policy(auto_airdrop_threshold=threshold)
+                    # Update both the legacy threshold and the active min_balance so runtime trigger reflects this value
+                    cfg_mgr.update_wallet_policy(
+                        auto_airdrop_threshold=threshold,
+                        auto_airdrop_min_balance=threshold,
+                    )
                     setattr(cfg_ctx.config, "auto_airdrop_threshold", threshold)
-                    return CommandResponse(messages=[("system", f"Airdrop threshold set to {threshold:.3f} SOL.")])
+                    setattr(cfg_ctx.config, "auto_airdrop_min_balance", threshold)
+                    return CommandResponse(messages=[("system", f"Airdrop threshold set to {threshold:.3f} SOL (min balance updated as well).")])
 
                 if sub == "cooldown":
                     if not args_rem:
