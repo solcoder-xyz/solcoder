@@ -114,22 +114,55 @@ poetry run solcoder --offline-mode
 ---
 
 ## 🎮 **Interactive Commands**
-
-Once inside SolCoder's REPL, you have access to powerful slash commands:
-
 | Command | Purpose |
 |---------|---------|
+| `/init [DIR] [--offline]` | Initialize an Anchor workspace (in CWD or DIR) |
+| `/new <key>` | Start blueprint wizard (counter, token, nft, registry, escrow) |
+| `/program inspect <program_id>` | Inspect on-chain IDL (Anchor-first) or SPL catalog |
+| `/program call <program_id> ...` | Prepare/execute memo/token flows; confirm before send |
 | `/wallet status` | Check balance & lock state |
+| `/wallet airdrop [amt]` | Request devnet/testnet airdrop with spinner and retry |
+| `/wallet policy ...` | Show/update spend cap and auto-airdrop policy |
 | `/wallet create` | Generate new keypair |
 | `/wallet unlock` | Decrypt wallet for spending |
 | `/wallet phrase` | View recovery mnemonic |
-| `/template <name>` | Scaffold from blueprint |
-| `/kb search <query>` | Search knowledge base |
+| `/toolkits list` | Show available automation |
 | `/settings mode <level>` | Toggle assistive/guided/manual |
 | `/settings spend <sol>` | Set session budget |
-| `/toolkits list` | Show available automation |
 | `/deploy` | Manual deploy to devnet |
 | `/config set` | Rotate LLM credentials |
+
+### Examples
+
+```bash
+# Initialize a workspace in the current directory (no Anchor required)
+/init --offline
+
+# Initialize a named workspace under ./workspace (uses anchor init if available)
+/init workspace --name my_workspace
+
+# Add a counter program to an existing Anchor project
+/new counter
+
+# Inspect an Anchor program by id (falls back to SPL catalog)
+/program inspect <PROGRAM_ID>
+```
+
+---
+
+## 🧰 **Toolkits (Agent-Callable Tools)**
+
+List toolkits and tools in the REPL:
+
+```bash
+/toolkits list
+/toolkits solcoder.workspace tools
+```
+
+Notable tools:
+- `solcoder.workspace.init_anchor_workspace` — initializes an Anchor workspace by dispatching `/init ...`.
+- `solcoder.wallet.request_airdrop` — dispatches `/wallet airdrop ...` with spinner/polling.
+- `solcoder.program.*` — inspects or prepares program calls; CLI confirms/executes safely.
 
 ---
 

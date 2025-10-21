@@ -10,6 +10,7 @@ from .review import review_toolkit
 from .session import session_toolkit
 from .wallet import wallet_toolkit
 from .program import program_toolkit
+from .workspace import workspace_toolkit
 
 DEFAULT_TOOLKIT_FACTORIES = [
     plan_toolkit,
@@ -22,6 +23,7 @@ DEFAULT_TOOLKIT_FACTORIES = [
     command_toolkit,
     wallet_toolkit,
     program_toolkit,
+    workspace_toolkit,
 ]
 
 __all__ = ["DEFAULT_TOOLKIT_FACTORIES"]
