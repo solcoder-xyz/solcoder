@@ -116,3 +116,35 @@ Connect templates to user prompts so `/new "<prompt>"` selects an Anchor bluepri
 
 ## Owners
 - CLI engineer primary; Solana engineer validates template wiring.
+
+## Anchor Workspace Integration
+- Workspace detection:
+  - Detect an Anchor workspace by searching for `Anchor.toml` from the target directory upward.
+  - If found, treat as existing Anchor project; if not found, treat as non‑Anchor directory.
+
+- Default placement:
+  - When an Anchor project is detected, `/new <key>` must add a new program under `programs/<program_name>/` and update `Anchor.toml` and Cargo workspace members.
+  - When no Anchor project is detected, prompt to initialize one here first. If the user agrees, initialize the workspace, then add the program. If declined, allow a `--standalone` scaffold that includes a minimal workspace structure.
+
+- Initialization flow (non‑Anchor):
+  - Validate prerequisites (e.g., `anchor` availability). If missing, suggest `/env install anchor`.
+  - Offer two paths:
+    - Preferred: run `anchor init <workspace_name>` and then apply the blueprint.
+    - Offline: scaffold minimal workspace files (Anchor.toml, Cargo.toml, programs/) without executing `anchor init`; document that `anchor build` is required later.
+
+- Flags and overrides:
+  - `--dir <path>` sets the destination (defaults to current root).
+  - `--workspace <path>` explicitly targets an Anchor workspace root for program insertion.
+  - `--standalone` forces a full workspace scaffold even if a workspace is detected.
+  - `--no-wizard` skips Q&A and uses defaults/flags only.
+
+- Session integration:
+  - After scaffold, set `active_project` to the workspace root; status bar shows the path.
+  - Print next steps (`/deploy`, `/program inspect`, `/program wizard`).
+
+- Agent handoff:
+  - The payload sent to the agent must include `blueprint_key`, validated `answers`, `target_dir`, and `workspace_root` (if applicable) so files are created under `programs/` when appropriate.
+
+- Acceptance:
+  - In an existing Anchor project, `/new token` places a new program under `programs/` and patches `Anchor.toml` and Cargo workspace.
+  - In a non‑Anchor directory, `/new counter` prompts for workspace initialization and proceeds accordingly.
