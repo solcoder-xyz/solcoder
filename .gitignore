@@ -31,6 +31,11 @@ env/
 *.log
 logs/
 .solcoder/
+.ruff_cache/
+.claude/
+tmp_keys*/
+llm_raw_response.json
+workspace/
 
 # Editors
 .idea/
