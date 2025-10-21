@@ -11,6 +11,32 @@ Connect templates to user prompts so `/new "<prompt>"` selects an Anchor bluepri
 - CLI feedback summarizing generated files and next-step hints.
 - Tests validating template selection and idempotent re-generation safeguards.
 
+### Required Blueprints (Tier 1)
+- Counter (Hello, Anchor)
+  - Instructions: init, increment, decrement, reset
+  - PDAs: counter by authority
+  - Extras: minimal TS test and example client scripts
+
+- Simple Token Mint (SPL)
+  - Flow: create mint, create ATAs, mint_to, transfer
+  - Options: toggle Token-2022 features (optional)
+  - Extras: CLI snippets for `spl-token` where applicable
+
+- NFT Mint (fixed metadata)
+  - Flow: create mint, set metadata (Metaplex), mint 1, update_uri
+  - PDAs: metadata/edition accounts
+  - Extras: JSON metadata example and devnet demo script
+
+- PDA Registry (key-value store)
+  - Instructions: upsert, get, delete
+  - PDAs: seeds = ["registry", authority, key]
+  - Extras: script to read/write entries and quick tests
+
+- Escrow (basic)
+  - Flow: init_escrow, deposit, withdraw, cancel
+  - PDAs: escrow by initializer (and optional vault ATA)
+  - Notes: highlight authority checks and cancel path
+
 ## Key Steps
 1. Design mapping heuristics and optional `--template` override flags.
 2. Implement rendering pipeline with conflict detection (prompt user before overwriting).
