@@ -53,6 +53,42 @@ Connect templates to user prompts so `/new "<prompt>"` selects an Anchor bluepri
   - Used by `/new` to list available options and by the LLM selection prompt.
 - Keep `RenderOptions` compatible and map registry entries to renderer inputs.
 
+### Wizard Mode (Interactive Config)
+- If the user invokes `/new <key>` directly (e.g., `/new token`), start a per‑blueprint wizard that asks the minimum set of config questions and then renders.
+- All wizard questions and defaults must be stored with the blueprint under `solaba/blueprints/<key>/` (e.g., `wizard.json` or `options.schema.json`) so the CLI does not hardcode content.
+- The wizard engine:
+  - Loads the question list + validation from the blueprint bundle.
+  - Prompts in the CLI with sane defaults; supports `--no-wizard` to skip and use flags/defaults.
+  - Persists answers into the rendered project config (e.g., Anchor `.toml`, `scripts/`, or a generated README section) and into the session notes for traceability.
+
+- Token wizard (example prompts):
+  - Token name (e.g., "SolCoder Token")
+  - Symbol (e.g., "SCT")
+  - Decimals (e.g., 9)
+  - Initial supply (amount + recipient; default to creator ATA)
+  - Authorities: mint authority, freeze authority (default to creator; allow none for freeze)
+  - Token-2022 features (optional toggles): transfer fee, interest-bearing, metadata pointer
+
+- NFT wizard (example prompts):
+  - Name, symbol
+  - URI/metadata JSON (provide devnet sample)
+  - Seller fee basis points
+  - Creators (addresses + shares)
+  - Optional collection address
+
+- Registry wizard:
+  - Key type (string | bytes | u64)
+  - Value type (string | bytes | u64)
+  - Access policy (owner‑only CRUD vs public read)
+
+- Escrow wizard:
+  - Token mint
+  - Counterparty address (optional at init)
+  - Expiry/cancel rules
+
+- Counter wizard:
+  - Optional initial value; otherwise accept defaults
+
 ## Key Steps
 1. Design mapping heuristics and optional `--template` override flags.
 2. Implement rendering pipeline with conflict detection (prompt user before overwriting).
