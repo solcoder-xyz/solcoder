@@ -1,9 +1,11 @@
-# Task 2.3 — `/new` Template Pipeline
+# Task 2.3 — `/new` Template Pipeline (Done)
 
 - Milestone: [MILESTONE-3_SOLANA_DEPLOY_LOOP](../milestones/MILESTONE-3_SOLANA_DEPLOY_LOOP.md)
 
 ## Objective
 Connect templates to user prompts so `/new "<prompt>"` selects an Anchor blueprint, renders it, and registers the workspace for subsequent build/deploy commands.
+
+Status: Completed
 
 ## Deliverables
 - Prompt classification logic mapping requests to available templates (counter, NFT mint).
