@@ -335,6 +335,12 @@ def _spl_token_quick_flow(
     if not status.exists or not status.public_key:
         return CommandResponse(messages=[("system", "No SolCoder wallet found. Run `/wallet create` or `/wallet restore` first.")])
 
+    # Capture balance before flow to compute spend delta
+    try:
+        balance_before = float(app._fetch_balance(status.public_key) or 0.0)
+    except Exception:
+        balance_before = 0.0
+
     # Parse decimals and supply
     decimals_raw = decimals_input if decimals_input is not None else 9
     try:
@@ -623,6 +629,23 @@ def _spl_token_quick_flow(
     if mint_tx_signature and minted_amount_display:
         lines.append(f"Minted {minted_amount_display} tokens (signature: {mint_tx_signature})")
     lines.append(f"Explorer: {explorer}")
+
+    # Update wallet balance and session spend based on observed delta
+    try:
+        status_after = app.wallet_manager.status()
+        balance_after = float(app._fetch_balance(status_after.public_key) or 0.0)
+        delta = max(0.0, balance_before - balance_after)
+        metadata = app.session_context.metadata
+        try:
+            metadata.spend_amount = float(getattr(metadata, "spend_amount", 0.0) or 0.0) + float(delta)
+        except Exception:
+            pass
+        app._update_wallet_metadata(status_after, balance=balance_after)
+        if delta > 0:
+            lines.append(f"Fees spent: {delta:.5f} SOL")
+            lines.append(f"Wallet balance: {balance_after:.3f} SOL")
+    except Exception:
+        pass
 
     app.log_event("token", f"Quick SPL token created: {mint_address}")
     return CommandResponse(messages=[("system", "\n".join(lines))])
