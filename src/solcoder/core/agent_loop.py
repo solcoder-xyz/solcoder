@@ -904,8 +904,10 @@ def _agent_system_prompt(
     rules += (
         "\nGood example: {\"type\":\"tool_request\",\"step_title\":\"List files\",\"tool\":{\"name\":\"execute_shell_command\",\"args\":{\"command\":\"ls -la\"}}}.\n"
         "Bad example: 'Sure, here is the command:' followed by raw shell text.\n\n"
-        "Preference: For SPL token operations, rely on guided SolCoder workflows or documented scripts instead of ad-hoc "
-        "shell commands to keep signer and RPC configuration consistent.\n"
+        "Preference: For SPL token operations, use the dedicated toolchain instead of ad-hoc shell commands. "
+        "Specifically, prefer the 'solcoder.token.create_quick_token' tool to stage a quick Token‑2022 mint, which will "
+        "dispatch '/new token --quick --decimals … --supply …' for interactive confirmation. Do NOT instruct the user to run raw "
+        "commands; the CLI will prompt for passphrase and confirmation.\n"
     )
 
     return (
