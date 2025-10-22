@@ -42,8 +42,24 @@ class ToolRegistry:
         registered: list[str] = []
         try:
             for tool in toolkit.tools:
+                # Register tool by its short name
                 self.register(tool, overwrite=overwrite)
                 registered.append(tool.name)
+                # Also register a namespaced alias: "<toolkit>.<tool>"
+                alias_name = f"{toolkit.name}.{tool.name}"
+                alias_tool = Tool(
+                    name=alias_name,
+                    description=tool.description,
+                    input_schema=tool.input_schema,
+                    output_schema=tool.output_schema,
+                    handler=tool.handler,
+                )
+                try:
+                    self.register(alias_tool, overwrite=False)
+                    registered.append(alias_name)
+                except ToolAlreadyRegisteredError:
+                    # Ignore if an alias already exists
+                    pass
         except Exception:
             for tool_name in registered:
                 self.unregister(tool_name)
