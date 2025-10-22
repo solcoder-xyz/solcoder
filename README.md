@@ -74,13 +74,24 @@ Choose your mode: **Assistive** (full agentic autonomy), **Guided** (confirm bef
 - **Python 3.11+**, **Node.js**, **Rust**, **Solana CLI**, **Anchor**
 
 ### Installation
+
+Option A — Global install via pipx (recommended)
 ```bash
-# Clone & install
+git clone https://github.com/yourusername/SolCoder.git
+cd SolCoder
+
+# Install pipx if needed; then install SolCoder globally
+./scripts/install_pipx.sh
+
+# Now run the CLI from any directory
+solcoder
+```
+
+Option B — Local dev via Poetry
+```bash
 git clone https://github.com/yourusername/SolCoder.git
 cd SolCoder
 poetry install
-
-# Launch the agent
 poetry run solcoder
 ```
 
@@ -95,6 +106,9 @@ poetry run solcoder
 ### Example Commands
 
 ```bash
+# Global CLI
+solcoder --help
+
 # Resume previous session
 poetry run solcoder --session abc123def456
 
@@ -109,6 +123,23 @@ poetry run solcoder --dry-run-llm
 
 # Offline mode (demos, no network)
 poetry run solcoder --offline-mode
+```
+
+### One‑Line Token + Metadata Flow
+
+```bash
+# Quick Token‑2022 mint (decimals=0, supply=1M) and on‑chain metadata write
+solcoder
+/new token --quick --decimals 0 --supply 1000000 --cluster devnet \
+  --meta-name "SolCoder Token" --meta-symbol SCT \
+  --meta-uri file:///absolute/path/to/metadata.json \
+  --meta-royalty-bps 500 --meta-run
+```
+If you omit --meta-uri, SolCoder auto‑generates a local metadata.json and uses its file:// URI. You can also upload assets first:
+
+```bash
+/metadata upload --file ./image.png
+/metadata wizard --mint <MINT>    # prompts and then writes on‑chain (optional)
 ```
 
 ---

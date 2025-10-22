@@ -3,7 +3,6 @@
     {"key": "program_name", "prompt": "Program name", "default": "nft", "pattern": "^[a-zA-Z0-9_-]+$"},
     {"key": "name", "prompt": "NFT name", "default": "SolCoder NFT"},
     {"key": "symbol", "prompt": "Symbol", "default": "SCN", "pattern": "^[A-Z0-9]{1,10}$"},
-    {"key": "uri", "prompt": "Metadata URI", "default": "https://example.com/metadata.json"}
+    {"key": "uri", "prompt": "Metadata URI (optional)", "default": ""}
   ]
 }
-

@@ -913,6 +913,7 @@ def _agent_system_prompt(
         "If the user explicitly states a program name (e.g., 'create nft named foo'), use that exact value as program_name. "
         "Collect missing answers from the user, then create the program via 'solcoder.blueprint.create_program_blueprint'. "
         "Optionally call 'solcoder.blueprint.check_program_exists' first to avoid name collisions; if exists, ask the user to pick a different name.\n"
+        "For NFT blueprints, 'uri' is optional at scaffold time — recommend using '/metadata wizard --mint <MINT>' after deploy to attach metadata.\n"
     )
 
     return (
