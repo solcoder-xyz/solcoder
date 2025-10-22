@@ -52,7 +52,7 @@ poetry run python scripts/build_kb_index.py       # Rebuild embeddings after edi
 - `src/solcoder/cli/` — Prompt Toolkit REPL, command router, UI widgets
 - `src/solcoder/core/` — Orchestration (agent loop, tool registry, config, session, LLM client)
 - `src/solcoder/solana/` — Wallet, RPC adapters, build/deploy flows
-- `templates/` — Reusable Anchor blueprints (counter, NFT mint)
+- `src/solcoder/anchor/blueprints/` — Reusable Anchor blueprints (counter, token, nft, registry, escrow)
 - `tests/` — Mirrors package layout; includes e2e fixtures
 - `docs/` — PRD, roadmap (milestones, todo, in_progress, done), WBS
 - `knowledge/` — Curated Solana docs for semantic search

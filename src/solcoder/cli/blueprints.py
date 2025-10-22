@@ -49,7 +49,7 @@ def load_wizard_schema(key: str) -> list[dict[str, Any]]:
 def resolve_registry_template_path(path_str: str) -> Path | None:
     """Resolve a registry template path relative to the installed package.
 
-    The registry stores relative paths like "templates/token". When SolCoder
+    The registry stores relative paths like "src/solcoder/anchor/blueprints/token/template". When SolCoder
     is launched from an arbitrary CWD, resolving relative to CWD breaks. This helper
     resolves against package roots so pip-installed users work reliably.
     """

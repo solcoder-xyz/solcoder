@@ -23,7 +23,7 @@ async function main() {
   console.log(`  Key type  : ${keyType}`);
   console.log(`  Value type: ${valueType}`);
   console.log("\nNext steps:");
-  console.log("  - Implement upsert/get/delete instructions in programs/<name>/src/lib.rs.");
+  console.log("  - Use the upsert/remove instructions in programs/<name>/src/lib.rs.");
   console.log("  - After deploy, call /program wizard <PROGRAM_ID> to try instructions.");
 }
 

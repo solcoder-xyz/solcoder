@@ -21,7 +21,7 @@ async function main() {
   console.log("Escrow config (from blueprint.answers.json):\n");
   console.log(`  Token mint (optional): ${mint || '(not set)'}`);
   console.log("\nNext steps:");
-  console.log("  - Implement init/deposit/withdraw/cancel in programs/<name>/src/lib.rs.");
+  console.log("  - Implement full flows in your client; use init/deposit/withdraw/cancel.");
   console.log("  - After deploy, use /program wizard <PROGRAM_ID> to run a flow.");
 }
 
