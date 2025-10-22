@@ -59,39 +59,11 @@ Status: Completed
 
 ### Wizard Mode (Interactive Config)
 - If the user invokes `/new <key>` directly (e.g., `/new token`), start a per‑blueprint wizard that asks the minimum set of config questions and then renders.
-- All wizard questions and defaults must be stored with the blueprint under `src/solcoder/anchor/blueprints/<key>/` (e.g., `wizard.json` or `options.schema.json`) so the CLI does not hardcode content.
+- All wizard questions and defaults are stored in src under `src/solcoder/anchor/blueprints/<key>/wizard.json` so the CLI does not hardcode content.
 - The wizard engine:
   - Loads the question list + validation from the blueprint bundle.
   - Prompts in the CLI with sane defaults; supports `--no-wizard` to skip and use flags/defaults.
   - Persists answers into the rendered project config (e.g., Anchor `.toml`, `scripts/`, or a generated README section) and into the session notes for traceability.
-
-- Token wizard (example prompts):
-  - Token name (e.g., "SolCoder Token")
-  - Symbol (e.g., "SCT")
-  - Decimals (e.g., 9)
-  - Initial supply (amount + recipient; default to creator ATA)
-  - Authorities: mint authority, freeze authority (default to creator; allow none for freeze)
-  - Token-2022 features (optional toggles): transfer fee, interest-bearing, metadata pointer
-
-- NFT wizard (example prompts):
-  - Name, symbol
-  - URI/metadata JSON (provide devnet sample)
-  - Seller fee basis points
-  - Creators (addresses + shares)
-  - Optional collection address
-
-- Registry wizard:
-  - Key type (string | bytes | u64)
-  - Value type (string | bytes | u64)
-  - Access policy (owner‑only CRUD vs public read)
-
-- Escrow wizard:
-  - Token mint
-  - Counterparty address (optional at init)
-  - Expiry/cancel rules
-
-- Counter wizard:
-  - Optional initial value; otherwise accept defaults
 
 ### End-of-Flow Handoff to Agent
 - After a blueprint is selected and the wizard collects answers, the CLI compiles a structured payload containing:
@@ -99,56 +71,11 @@ Status: Completed
   - `answers` (key/value map from the wizard, validated against the blueprint schema)
   - `target_dir` (the destination directory for generated files)
 - Default `target_dir` is the workspace root; the user can override via `--dir <path>` or a wizard prompt.
-- The CLI then asks the agent to create the blueprint files according to this payload (concise system prompt without full history), and waits for completion.
+- The CLI then asks the agent to create the blueprint files according to this payload and waits for completion.
 - Upon success, the CLI registers the created path as the active project and prints a summary plus next steps (e.g., `/deploy`, `/program inspect`).
 
-## Key Steps
-1. Design mapping heuristics and optional `--template` override flags.
-2. Implement rendering pipeline with conflict detection (prompt user before overwriting).
-3. Update session to persist active project directory and Anchor workspace config.
-4. Write tests in `tests/cli/test_new_command.py` covering selection, overrides, and error paths.
-5. Document usage examples in README and milestone notes.
-
-## Dependencies
-- Task 1.9 counter template and upcoming NFT template assets.
-- Task 1.3 session services.
-
-## Acceptance Criteria
+### Acceptance Criteria
 - `/new "create a counter app"` generates counter template and registers workspace.
 - CLI outputs follow-up commands (`/deploy`, `/code`) and handles existing directories gracefully.
 - Tests cover mapping, overrides, and repeated execution scenarios.
 
-## Owners
-- CLI engineer primary; Solana engineer validates template wiring.
-
-## Anchor Workspace Integration
-- Workspace detection:
-  - Detect an Anchor workspace by searching for `Anchor.toml` from the target directory upward.
-  - If found, treat as existing Anchor project; if not found, treat as non‑Anchor directory.
-
-- Default placement:
-  - When an Anchor project is detected, `/new <key>` must add a new program under `programs/<program_name>/` and update `Anchor.toml` and Cargo workspace members.
-  - When no Anchor project is detected, prompt to initialize one here first. If the user agrees, initialize the workspace, then add the program. If declined, allow a `--standalone` scaffold that includes a minimal workspace structure.
-
-- Initialization flow (non‑Anchor):
-  - Validate prerequisites (e.g., `anchor` availability). If missing, suggest `/env install anchor`.
-  - Offer two paths:
-    - Preferred: run `anchor init <workspace_name>` and then apply the blueprint.
-    - Offline: scaffold minimal workspace files (Anchor.toml, Cargo.toml, programs/) without executing `anchor init`; document that `anchor build` is required later.
-
-- Flags and overrides:
-  - `--dir <path>` sets the destination (defaults to current root).
-  - `--workspace <path>` explicitly targets an Anchor workspace root for program insertion.
-  - `--standalone` forces a full workspace scaffold even if a workspace is detected.
-  - `--no-wizard` skips Q&A and uses defaults/flags only.
-
-- Session integration:
-  - After scaffold, set `active_project` to the workspace root; status bar shows the path.
-  - Print next steps (`/deploy`, `/program inspect`, `/program wizard`).
-
-- Agent handoff:
-  - The payload sent to the agent must include `blueprint_key`, validated `answers`, `target_dir`, and `workspace_root` (if applicable) so files are created under `programs/` when appropriate.
-
-- Acceptance:
-  - In an existing Anchor project, `/new token` places a new program under `programs/` and patches `Anchor.toml` and Cargo workspace.
-  - In a non‑Anchor directory, `/new counter` prompts for workspace initialization and proceeds accordingly.
