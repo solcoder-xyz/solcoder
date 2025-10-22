@@ -75,9 +75,18 @@ Choose your mode: **Assistive** (full agentic autonomy), **Guided** (confirm bef
 
 ### Installation
 
+Before installing dependencies, activate a Python virtual environment (optional but
+recommended for local development):
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+```
+
 Option A — Global install via pipx (recommended)
 ```bash
-git clone https://github.com/yourusername/SolCoder.git
+git clone https://github.com/solcoder/SolCoder.git
 cd SolCoder
 
 # Install pipx if needed; then install SolCoder globally
@@ -89,11 +98,22 @@ solcoder
 
 Option B — Local dev via Poetry
 ```bash
-git clone https://github.com/yourusername/SolCoder.git
+git clone https://github.com/solcoder/SolCoder.git
 cd SolCoder
 poetry install
 poetry run solcoder
 ```
+
+Option C — Makefile helpers
+```bash
+# Install via pipx using the Makefile recipe
+make install
+
+# Install the local checkout in editable mode inside your active venv
+make install-local
+```
+Using `make install-local` keeps the CLI pointed at your working copy so local changes
+are reflected immediately when you invoke `solcoder`.
 
 ### Your First Project (2 min walkthrough)
 
@@ -337,8 +357,8 @@ This is **Solana's distributed workforce**. Not replacing humans—amplifying th
 We welcome contributions from builders of all levels. Here's how:
 
 ### **Ideas & Feedback**
-- [**Discussions**](https://github.com/yourusername/SolCoder/discussions) — Share feature requests, ask questions
-- [**Issues**](https://github.com/yourusername/SolCoder/issues) — Report bugs or propose enhancements
+- [**Discussions**](https://github.com/solcoder/SolCoder/discussions) — Share feature requests, ask questions
+- [**Issues**](https://github.com/solcoder/SolCoder/issues) — Report bugs or propose enhancements
 
 ### **Code Contributions**
 
@@ -422,8 +442,8 @@ See `docs/roadmap/` for detailed milestones, tasks, and in-progress work.
 
 ## 🆘 **Support & Feedback**
 
-- 💬 **[GitHub Discussions](https://github.com/yourusername/SolCoder/discussions)** — Ask questions, share ideas
-- 🐛 **[GitHub Issues](https://github.com/yourusername/SolCoder/issues)** — Report bugs or suggest features
+- 💬 **[GitHub Discussions](https://github.com/solcoder/SolCoder/discussions)** — Ask questions, share ideas
+- 🐛 **[GitHub Issues](https://github.com/solcoder/SolCoder/issues)** — Report bugs or suggest features
 - 🔐 **Security** — For wallet or deployment issues, include CLI output (with secrets redacted)
 
 ---
@@ -462,6 +482,6 @@ poetry run solcoder
 
 <div align="center">
 
-**Made with ❤️ for the Solana ecosystem** | [Follow us](https://twitter.com/yourusername) | [Star ⭐ us on GitHub](https://github.com/yourusername/SolCoder)
+**Made with ❤️ for the Solana ecosystem** | [Follow us](https://twitter.com/solcoder) | [Star ⭐ us on GitHub](https://github.com/solcoder/SolCoder)
 
 </div>

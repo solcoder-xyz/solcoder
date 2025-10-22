@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
+from solcoder.cli.storage import bundlr_upload, ipfs_upload_nft_storage, ipfs_upload_dir_web3storage
 
 if TYPE_CHECKING:  # pragma: no cover
     from solcoder.cli.app import CLIApp
@@ -192,26 +193,75 @@ def register(app: CLIApp, router: CommandRouter) -> None:
 
         if sub == "upload":
             if len(args) < 3 or args[1] not in {"--file", "--dir"}:
-                return CommandResponse(messages=[("system", "Usage: /metadata upload --file <path>|--dir <path>")])
+                return CommandResponse(messages=[("system", "Usage: /metadata upload --file <path>|--dir <path> [--storage auto|bundlr|ipfs]")])
             key = args[1]
             src = Path(args[2]).expanduser()
+            storage = "auto"
+            i = 3
+            while i < len(args):
+                tok = args[i]
+                if tok == "--storage" and i + 1 < len(args):
+                    storage = args[i + 1].strip().lower()
+                    i += 2
+                    continue
+                i += 1
             if not src.exists():
                 return CommandResponse(messages=[("system", f"Path not found: {src}")])
-            target_base = _uploads_dir(app) / time.strftime("%Y%m%d_%H%M%S")
-            if key == "--file":
-                target_base.mkdir(parents=True, exist_ok=True)
-                target = target_base / src.name
-                shutil.copy2(src, target)
-                uri = f"file://{target}"
-                return CommandResponse(messages=[("system", f"Uploaded: {uri}")])
+            # Choose provider
+            cfg = getattr(app, "config_context", None)
+            rpc = getattr(getattr(cfg, "config", None), "rpc_url", "https://api.devnet.solana.com")
+            workspace_root = _workspace_root(app)
+            ipfs_key = getattr(getattr(cfg, "config", None), "nft_storage_api_key", None) or getattr(getattr(cfg, "config", None), "web3_storage_api_key", None)
+            use_ipfs = storage == "ipfs" or (storage == "auto" and ipfs_key and not shutil.which("npm"))
+            if storage == "ipfs" and not ipfs_key:
+                return CommandResponse(messages=[("system", "IPFS provider requested but no API key configured in .solcoder/config.toml (nft_storage_api_key or web3_storage_api_key).")])
+            # File selection
+            if key == "--dir" and not src.is_dir():
+                return CommandResponse(messages=[("system", f"Not a directory: {src}")])
+            if key == "--file" and not src.is_file():
+                return CommandResponse(messages=[("system", f"Not a file: {src}")])
+
+            # Uploader execution
+            if use_ipfs:
+                try:
+                    with app.console.status("Uploading to IPFS…", spinner="dots"):
+                        if src.is_file():
+                            url = ipfs_upload_nft_storage(src, str(ipfs_key))
+                        else:
+                            url = ipfs_upload_dir_web3storage(src, str(ipfs_key), console=app.console)
+                except Exception as exc:  # noqa: BLE001
+                    return CommandResponse(messages=[("system", f"IPFS upload failed: {exc}")])
+                return CommandResponse(messages=[("system", f"Uploaded: {url}")])
             else:
-                if not src.is_dir():
-                    return CommandResponse(messages=[("system", f"Not a directory: {src}")])
-                shutil.copytree(src, target_base)
-                # List URIs
-                uris = [f"file://{p}" for p in sorted(target_base.rglob("*")) if p.is_file()]
-                content = "\n".join(["Uploaded URIs:", *uris])
-                return CommandResponse(messages=[("system", content)])
+                # Prefer Bundlr/Irys via Node runner
+                file_to_upload = src if src.is_file() else (src / "metadata.json")
+                if not file_to_upload.exists():
+                    # fallback to local copy if directory without metadata.json
+                    target_base = _uploads_dir(app) / time.strftime("%Y%m%d_%H%M%S")
+                    shutil.copytree(src, target_base)
+                    uris = [f"file://{p}" for p in sorted(target_base.rglob("*")) if p.is_file()]
+                    content = "\n".join(["(local fallback) Uploaded URIs:", *uris])
+                    return CommandResponse(messages=[("system", content)])
+                try:
+                    status = app.wallet_manager.status()
+                    if not status.exists:
+                        return CommandResponse(messages=[("system", "No wallet available for Bundlr payment. Create or restore a wallet first.")])
+                    passphrase = app._prompt_secret("Wallet passphrase", allow_master=False)
+                    secret = app.wallet_manager.export_wallet(passphrase)
+                except Exception as exc:  # noqa: BLE001
+                    return CommandResponse(messages=[("system", f"Wallet export failed: {exc}")])
+                try:
+                    with app.console.status("Uploading to Bundlr…", spinner="dots"):
+                        url = bundlr_upload(
+                            file_to_upload,
+                            rpc_url=str(rpc),
+                            key_json=secret,
+                            console=app.console,
+                            workspace_root=workspace_root,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    return CommandResponse(messages=[("system", f"Bundlr upload failed: {exc}")])
+                return CommandResponse(messages=[("system", f"Uploaded: {url}")])
 
         if sub == "wizard":
             mint: str | None = None
@@ -233,7 +283,26 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             # Ask minimal fields
             name = app._prompt_text("Name").strip() or "Untitled"
             symbol = app._prompt_text("Symbol").strip() or "TKN"
-            uri = app._prompt_text("Metadata URI").strip() or ""
+            # Storage preference and asset selection
+            storage_pref = app._prompt_text("Storage (auto/bundlr/ipfs) [auto]").strip().lower() or "auto"
+            asset_path = app._prompt_text("Asset (file or directory; leave blank to auto-generate)").strip()
+            uri = ""
+            if asset_path:
+                # Reuse internal upload logic
+                cmd = "/metadata upload --file " + asset_path if Path(asset_path).is_file() else "/metadata upload --dir " + asset_path
+                if storage_pref in {"bundlr", "ipfs"}:
+                    cmd += f" --storage {storage_pref}"
+                routed = app.command_router.dispatch(app, cmd[1:])
+                # Extract returned URL from message
+                for _, msg in routed.messages:
+                    for line in msg.splitlines():
+                        if line.startswith("Uploaded:"):
+                            uri = line.split(":", 1)[1].strip()
+                            break
+                if not uri:
+                    app.console.print("[#F97316]Upload did not return a URI; falling back to manual URI entry.[/]")
+            if not uri:
+                uri = app._prompt_text("Metadata URI (leave blank to auto-generate)").strip()
             royalty_bps = app._prompt_text("Seller fee bps (optional)").strip()
             creators = app._prompt_text("Creators 'PK:BPS,...' (optional)").strip()
             collection = app._prompt_text("Collection address (optional)").strip()
@@ -336,6 +405,18 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             if args_obj.royalty_bps is not None:
                 lines.append(f"  Royalty bps: {args_obj.royalty_bps}")
             if args_obj.creators:
+                # Validate shares sum to 100 if provided as share (%)
+                try:
+                    parts = [p.strip() for p in str(args_obj.creators).split(',') if p.strip()]
+                    shares = []
+                    for part in parts:
+                        segs = part.split(':')
+                        if len(segs) >= 2:
+                            shares.append(int(segs[1]))
+                    if shares and sum(shares) != 100:
+                        lines.append(f"  (warning) creators shares sum to {sum(shares)}; runner will normalize to 100%")
+                except Exception:
+                    pass
                 lines.append(f"  Creators  : {args_obj.creators}")
             if args_obj.collection:
                 lines.append(f"  Collection: {args_obj.collection}")
@@ -429,6 +510,50 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             return CommandResponse(messages=[("system", "\n".join(lines))])
 
         return CommandResponse(messages=[("system", "Unknown subcommand. Try '/metadata help'.")])
+
+        if sub == "install":
+            root = _workspace_root(app)
+            lines: list[str] = []
+            # Scaffold runners
+            try:
+                set_runner = _write_runner(app)
+                lines.append(f"Prepared metadata runner: {set_runner}")
+            except Exception as exc:  # noqa: BLE001
+                lines.append(f"(warning) Failed to scaffold metadata runner: {exc}")
+                set_runner = None
+            try:
+                from solcoder.cli.storage import ensure_bundlr_runner, ensure_ipfs_runner
+                b_runner = ensure_bundlr_runner(root)
+                i_runner = ensure_ipfs_runner(root)
+                lines.append(f"Prepared upload runners: {b_runner}, {i_runner}")
+            except Exception as exc:  # noqa: BLE001
+                lines.append(f"(warning) Failed to scaffold upload runners: {exc}")
+                b_runner = None
+                i_runner = None
+            # Install deps where applicable
+            import shutil as _shutil
+            import subprocess as _subprocess
+            for runner in [p for p in [set_runner, b_runner, i_runner] if p is not None]:
+                pkg = runner / "package.json"
+                if not pkg.exists():
+                    continue
+                if (runner / "node_modules").exists():
+                    lines.append(f"Deps already installed: {runner}")
+                    continue
+                if not _shutil.which("npm"):
+                    lines.append("(warning) npm not found; install Node.js to proceed with runner setup.")
+                    continue
+                try:
+                    with app.console.status(f"Installing dependencies in {runner}…", spinner="dots"):
+                        res = _subprocess.run(["npm", "install"], cwd=str(runner), capture_output=True, text=True, check=False)
+                    if res.returncode == 0:
+                        lines.append(f"Installed deps: {runner}")
+                    else:
+                        err = res.stderr.strip() or res.stdout.strip() or "npm install failed"
+                        lines.append(f"(warning) Failed to install deps in {runner}: {err}")
+                except FileNotFoundError:
+                    lines.append("(warning) npm not found; skipping install.")
+            return CommandResponse(messages=[("system", "\n".join(lines))])
 
     router.register(
         SlashCommand(

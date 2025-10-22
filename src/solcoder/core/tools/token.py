@@ -97,7 +97,8 @@ def _create_quick_token_handler(payload: dict[str, Any]) -> ToolResult:
         parts += ["--meta-collection", meta_collection.strip()]
     if isinstance(meta_run, bool) and meta_run:
         parts += ["--meta-run"]
-    dispatch = " ".join(parts)
+    import shlex as _shlex
+    dispatch = " ".join(_shlex.quote(p) for p in parts)
 
     summary = (
         "Prepare quick SPL token mint (Token-2022):\n"

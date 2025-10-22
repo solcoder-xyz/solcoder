@@ -117,6 +117,12 @@ REQUIRED_TOOLS: tuple[ToolRequirement, ...] = (
             "~/.cargo/bin/spl-token",
         ),
     ),
+    ToolRequirement(
+        name="Umi Runtime",
+        executable="node",
+        version_args=["--version"],
+        remediation="Install Node.js (nvm or official installer) to run Umi runners.",
+    ),
 )
 
 
