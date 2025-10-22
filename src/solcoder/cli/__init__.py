@@ -713,21 +713,21 @@ def _launch_shell(
     rpc_client = SolanaRPCClient(endpoint=config_context.config.rpc_url)
     airdrop_time = _bootstrap_wallet(wallet_manager, rpc_client, config_context.passphrase)
 
+    # Prefer live detection of an Anchor workspace under the current project root.
     detected_workspace = _detect_anchor_workspace(project_root)
     default_active = detected_workspace or project_root
-    try:
-        active_ws_file = project_home / "active_workspace"
-        if active_ws_file.exists():
-            candidate_text = active_ws_file.read_text().strip()
-            if candidate_text:
-                candidate_path = Path(candidate_text).expanduser()
-                if (candidate_path / "Anchor.toml").exists():
-                    default_active = candidate_path
-                elif detected_workspace is not None:
-                    default_active = detected_workspace
-    except Exception:
-        if detected_workspace is not None:
-            default_active = detected_workspace
+    # Only fall back to a previously persisted active workspace if none detected now.
+    if detected_workspace is None:
+        try:
+            active_ws_file = project_home / "active_workspace"
+            if active_ws_file.exists():
+                candidate_text = active_ws_file.read_text().strip()
+                if candidate_text:
+                    candidate_path = Path(candidate_text).expanduser()
+                    if (candidate_path / "Anchor.toml").exists():
+                        default_active = candidate_path
+        except Exception:
+            pass
 
     resume_id = None if new_session else session
     if resume_id:
