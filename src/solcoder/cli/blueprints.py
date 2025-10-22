@@ -47,16 +47,43 @@ def load_wizard_schema(key: str) -> list[dict[str, Any]]:
     return list(data.get("questions") or [])
 
 def resolve_registry_template_path(path_str: str) -> Path | None:
-    """Resolve a registry template path relative to the installed package.
+    """Resolve a registry template path to a concrete directory.
 
-    The registry stores relative paths like "src/solcoder/anchor/blueprints/token/template". When SolCoder
-    is launched from an arbitrary CWD, resolving relative to CWD breaks. This helper
-    resolves against package roots so pip-installed users work reliably.
+    Supports the following forms and normalizes them for both repo and pip installs:
+    - Absolute path
+    - Relative to package root (e.g. "solcoder/anchor/blueprints/<key>/template")
+    - Relative to source root ("src/solcoder/anchor/blueprints/<key>/template")
+    - Relative to blueprint root ("<key>/template")
     """
-    p = Path(path_str)
-    if p.is_absolute():
-        return p if p.exists() else None
-    # Candidate bases: package root (…/solcoder), its parent (…/src), and repo root (parent of src)
+    raw = (path_str or "").strip()
+    if not raw:
+        return None
+
+    # Absolute path
+    p = Path(raw)
+    if p.is_absolute() and p.exists():
+        return p
+
+    # Strip common leading prefixes like "./" and optional "src/"
+    if raw.startswith("./"):
+        raw = raw[2:]
+    if raw.startswith("src/"):
+        raw = raw[4:]
+
+    # Try resolving against the known blueprints root first
+    bp_candidate = (BLUEPRINTS_ROOT / raw).resolve()
+    if bp_candidate.exists():
+        return bp_candidate
+
+    # If the path contains "solcoder/anchor/blueprints/", trim up to that and retry
+    marker = "solcoder/anchor/blueprints/"
+    if marker in raw:
+        suffix = raw.split(marker, 1)[1]
+        bp_candidate2 = (BLUEPRINTS_ROOT / suffix).resolve()
+        if bp_candidate2.exists():
+            return bp_candidate2
+
+    # Fallbacks: try a few base candidates similar to repo layouts
     candidates: list[Path] = []
     try:
         pkg_root = BLUEPRINTS_ROOT.parent.parent  # …/solcoder
@@ -67,7 +94,7 @@ def resolve_registry_template_path(path_str: str) -> Path | None:
         pass
     for base in candidates:
         try:
-            candidate = (base / p).resolve()
+            candidate = (base / raw).resolve()
         except Exception:
             continue
         if candidate.exists():

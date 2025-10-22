@@ -239,6 +239,12 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     if not status.exists or not status.public_key:
                         return CommandResponse(messages=[("system", "No wallet available. Create or restore one first.")])
                     rpc = rpc_url or "https://api.devnet.solana.com"
+                    # Enforce session spend cap with a conservative fee estimate
+                    exceeds, projected, cap = app._would_exceed_spend_cap(0.002)
+                    if exceeds:
+                        cap_str = f"{cap:.3f} SOL" if cap is not None else "configured limit"
+                        proj_str = f"{projected:.3f} SOL" if projected is not None else "+fee"
+                        return CommandResponse(messages=[("system", f"Session spend cap exceeded. Projected spend {proj_str} exceeds limit {cap_str}.")])
                     summary = "\n".join([
                         f"Program: {program_id} (spl-memo)",
                         f"Memo: {memo_text}",
@@ -249,6 +255,11 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     ack = app._prompt_text("Confirm").strip().lower()
                     if ack != "send":
                         return CommandResponse(messages=[("system", "Cancelled.")])
+                    # Snapshot balance before to update spend accounting after success
+                    try:
+                        balance_before = float(app._fetch_balance(status.public_key) or 0.0)
+                    except Exception:
+                        balance_before = 0.0
                     # Ensure Solana CLI is available, then export key and run memo
                     import tempfile
                     import json as _json
@@ -305,8 +316,21 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                         signature = payload.get("signature")
                     except Exception:
                         signature = None
-                    msg = f"Memo submitted. Signature: {signature or '(unknown)'}"
-                    return CommandResponse(messages=[("system", msg)])
+                    # Update spend accounting based on actual delta
+                    try:
+                        status_after = manager.status()
+                        balance_after = float(app._fetch_balance(status_after.public_key) or 0.0)
+                        delta = max(0.0, balance_before - balance_after)
+                        metadata = app.session_context.metadata
+                        metadata.spend_amount = float(getattr(metadata, "spend_amount", 0.0) or 0.0) + float(delta)
+                        app._update_wallet_metadata(status_after, balance=balance_after)
+                        balance_line = f"Wallet balance: {balance_after:.3f} SOL" if balance_after is not None else None
+                    except Exception:
+                        balance_line = None
+                    lines = [f"Memo submitted. Signature: {signature or '(unknown)'}"]
+                    if balance_line:
+                        lines.append(balance_line)
+                    return CommandResponse(messages=[("system", "\n".join(lines))])
 
                 if pname == "spl-token":
                     if shutil.which("spl-token") is None:
@@ -335,6 +359,18 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     ack = app._prompt_text("Confirm").strip().lower()
                     if ack != "send":
                         return CommandResponse(messages=[("system", "Cancelled.")])
+                    # Enforce session spend cap with conservative fee estimate
+                    exceeds, projected, cap = app._would_exceed_spend_cap(0.002)
+                    if exceeds:
+                        cap_str = f"{cap:.3f} SOL" if cap is not None else "configured limit"
+                        proj_str = f"{projected:.3f} SOL" if projected is not None else "+fee"
+                        return CommandResponse(messages=[("system", f"Session spend cap exceeded. Projected spend {proj_str} exceeds limit {cap_str}.")])
+                    # Snapshot balance before to update spend accounting after success
+                    try:
+                        status_now = app.wallet_manager.status()
+                        balance_before = float(app._fetch_balance(status_now.public_key) or 0.0)
+                    except Exception:
+                        balance_before = 0.0
                     # Export key and run spl-token transfer
                     import tempfile
                     try:
@@ -381,7 +417,21 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                         if "Signature" in line:
                             sig = line.split(":", 1)[-1].strip()
                             break
-                    return CommandResponse(messages=[("system", f"Token transfer submitted. Signature: {sig or '(unknown)'}")])
+                    # Update spend accounting
+                    try:
+                        status_after = app.wallet_manager.status()
+                        balance_after = float(app._fetch_balance(status_after.public_key) or 0.0)
+                        delta = max(0.0, balance_before - balance_after)
+                        metadata = app.session_context.metadata
+                        metadata.spend_amount = float(getattr(metadata, "spend_amount", 0.0) or 0.0) + float(delta)
+                        app._update_wallet_metadata(status_after, balance=balance_after)
+                        balance_line = f"Wallet balance: {balance_after:.3f} SOL" if balance_after is not None else None
+                    except Exception:
+                        balance_line = None
+                    lines = [f"Token transfer submitted. Signature: {sig or '(unknown)'}"]
+                    if balance_line:
+                        lines.append(balance_line)
+                    return CommandResponse(messages=[("system", "\n".join(lines))])
 
             # Default: prepare only
             message = (

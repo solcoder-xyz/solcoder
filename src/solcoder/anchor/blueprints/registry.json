@@ -1,9 +1,9 @@
 {
   "blueprints": [
-    {"key": "counter", "name": "Counter", "description": "Hello Anchor", "template_path": "src/solcoder/anchor/blueprints/counter/template", "tags": ["starter"], "required_tools": ["anchor"]},
-    {"key": "token", "name": "Simple Token", "description": "Token scaffold (stub)", "template_path": "src/solcoder/anchor/blueprints/token/template", "tags": ["spl"], "required_tools": ["anchor", "solana"]},
-    {"key": "nft", "name": "NFT", "description": "NFT scaffold (stub)", "template_path": "src/solcoder/anchor/blueprints/nft/template", "tags": ["nft"], "required_tools": ["anchor", "solana"]},
-    {"key": "registry", "name": "PDA Registry", "description": "Key-value registry (stub)", "template_path": "src/solcoder/anchor/blueprints/registry/template", "tags": ["pda"], "required_tools": ["anchor"]},
-    {"key": "escrow", "name": "Escrow", "description": "Basic escrow (stub)", "template_path": "src/solcoder/anchor/blueprints/escrow/template", "tags": ["tokens"], "required_tools": ["anchor"]}
+    {"key": "counter", "name": "Counter", "description": "Hello Anchor", "template_path": "counter/template", "tags": ["starter"], "required_tools": ["anchor"]},
+    {"key": "token", "name": "Simple Token", "description": "Token scaffold (stub)", "template_path": "token/template", "tags": ["spl"], "required_tools": ["anchor", "solana"]},
+    {"key": "nft", "name": "NFT", "description": "NFT scaffold (stub)", "template_path": "nft/template", "tags": ["nft"], "required_tools": ["anchor", "solana"]},
+    {"key": "registry", "name": "PDA Registry", "description": "Key-value registry (stub)", "template_path": "registry/template", "tags": ["pda"], "required_tools": ["anchor"]},
+    {"key": "escrow", "name": "Escrow", "description": "Basic escrow (stub)", "template_path": "escrow/template", "tags": ["tokens"], "required_tools": ["anchor"]}
   ]
 }
