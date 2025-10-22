@@ -129,6 +129,16 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         network = getattr(getattr(cfg, "config", None), "network", None)
         rpc_url = getattr(getattr(cfg, "config", None), "rpc_url", None)
 
+        def _explorer_url(signature: str | None) -> str | None:
+            if not signature:
+                return None
+            base = f"https://explorer.solana.com/tx/{signature}"
+            net = (network or "").lower() if isinstance(network, str) else ""
+            if net in {"devnet", "testnet"}:
+                return f"{base}?cluster={net}"
+            # Treat mainnet-beta / mainnet as default (no suffix)
+            return base
+
         if not args or args[0] in {"help", "--help", "-h"}:
             usage = "\n".join(
                 [
@@ -328,6 +338,9 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     except Exception:
                         balance_line = None
                     lines = [f"Memo submitted. Signature: {signature or '(unknown)'}"]
+                    url = _explorer_url(signature)
+                    if url:
+                        lines.append(f"Explorer: {url}")
                     if balance_line:
                         lines.append(balance_line)
                     return CommandResponse(messages=[("system", "\n".join(lines))])
@@ -429,6 +442,9 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     except Exception:
                         balance_line = None
                     lines = [f"Token transfer submitted. Signature: {sig or '(unknown)'}"]
+                    url = _explorer_url(sig)
+                    if url:
+                        lines.append(f"Explorer: {url}")
                     if balance_line:
                         lines.append(balance_line)
                     return CommandResponse(messages=[("system", "\n".join(lines))])

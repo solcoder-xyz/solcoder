@@ -13,6 +13,7 @@ from .program import program_toolkit
 from .workspace import workspace_toolkit
 from .blueprint import blueprint_toolkit
 from .token import token_toolkit
+from .metadata import metadata_toolkit
 
 DEFAULT_TOOLKIT_FACTORIES = [
     plan_toolkit,
@@ -28,6 +29,7 @@ DEFAULT_TOOLKIT_FACTORIES = [
     workspace_toolkit,
     blueprint_toolkit,
     token_toolkit,
+    metadata_toolkit,
 ]
 
 __all__ = ["DEFAULT_TOOLKIT_FACTORIES"]

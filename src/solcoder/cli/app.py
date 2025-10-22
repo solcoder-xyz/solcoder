@@ -703,6 +703,27 @@ class CLIApp:
                 f"[#F97316]Reminder:[/] {names} require manual installation steps."
             )
 
+        # Suggest installing project-local metadata runner deps if a runner is scaffolded
+        try:
+            active = getattr(self.session_context.metadata, "active_project", None)
+            root = Path(active).expanduser() if active else Path.cwd()
+            runner_dir = root / ".solcoder" / "metadata_runner"
+            pkg_json = runner_dir / "package.json"
+            node_modules = runner_dir / "node_modules"
+            if pkg_json.exists() and not node_modules.exists():
+                answer = prompt_text(
+                    self.session,
+                    "Install metadata runner (Umi) dependencies now? (y/N)",
+                ).strip().lower()
+                if answer in {"y", "yes"}:
+                    from solcoder.core.installers import install_tool, InstallerError
+                    try:
+                        install_tool("metadata-runner", console=self.console)
+                    except InstallerError as exc:
+                        self.console.print(f"[#F97316]Metadata runner install failed: {exc}[/]")
+        except Exception:
+            pass
+
         prompt_text(
             self.session,
             "Diagnostics complete. Press Enter when you’re ready to open the SolCoder shell.",
@@ -766,9 +787,19 @@ class CLIApp:
             pass
         env_summary = "; ".join(runtime_ctx_parts) if runtime_ctx_parts else None
 
+        # Build conversation history and append a notice to treat the new prompt as a fresh task
+        conv_history = self.context_manager.conversation_history()
+        conv_history.append({
+            "role": "system",
+            "content": (
+                "Notice: The user has provided new instructions. Treat this prompt as a new task and "
+                "abandon any previous plans/TODOs unless the user explicitly asks to continue them."
+            ),
+        })
+
         context = AgentLoopContext(
             prompt=prompt,
-            history=self.context_manager.conversation_history(),
+            history=conv_history,
             llm=self._llm,
             tool_registry=self.tool_registry,
             console=self.console,

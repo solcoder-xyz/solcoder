@@ -151,6 +151,17 @@ INSTALLER_SPECS: dict[str, InstallerSpec] = {
         verification_targets=("SPL Token CLI",),
         required=False,
     ),
+    "metadata-runner": InstallerSpec(
+        key="metadata-runner",
+        display_name="Metadata Runner (Umi) deps",
+        command_map={
+            "macos": ("npm install",),
+            "linux": ("npm install",),
+        },
+        # Use Node.js as a proxy verification (ensures node/npm available). Project-local deps are not globally verifiable.
+        verification_targets=("Node.js",),
+        required=False,
+    ),
 }
 
 
