@@ -23,8 +23,9 @@ def _create_quick_token_handler(payload: dict[str, Any]) -> ToolResult:
 
     # Prepare CLI dispatch. The CLI will prompt the user for passphrase and a final confirmation.
     parts = [
-        "/token",
-        "quick",
+        "/new",
+        "token",
+        "--quick",
         "--decimals",
         str(dval),
         "--supply",
@@ -76,4 +77,3 @@ def token_toolkit() -> Toolkit:
 
 
 __all__ = ["token_toolkit"]
-

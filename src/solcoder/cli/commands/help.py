@@ -14,7 +14,8 @@ def register(app: CLIApp, router: CommandRouter) -> None:
     """Register the /help command."""
 
     def handle(_app: CLIApp, _args: list[str]) -> CommandResponse:
-        commands = sorted(router.available_commands(), key=lambda cmd: cmd.name)
+        commands = [c for c in router.available_commands() if not c.name.startswith("_")]
+        commands = sorted(commands, key=lambda cmd: cmd.name)
         lines = ["Available commands:"]
         for command in commands:
             lines.append(f"/{command.name}\t{command.help_text}")

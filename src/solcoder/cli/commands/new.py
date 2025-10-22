@@ -52,6 +52,9 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         program_id: str | None = None
         cluster: str | None = None
         force = False
+        quick_mode = False
+        quick_decimals: int | None = None
+        quick_supply: str | None = None
 
         i = 1
         while i < len(args):
@@ -79,6 +82,27 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             if tok == "--force":
                 force = True
                 i += 1
+                continue
+            if tok == "--quick":
+                quick_mode = True
+                i += 1
+                continue
+            if tok == "--mode" and i + 1 < len(args):
+                mode_val = args[i + 1].strip().lower()
+                if mode_val == "quick":
+                    quick_mode = True
+                i += 2
+                continue
+            if tok == "--decimals" and i + 1 < len(args):
+                try:
+                    quick_decimals = int(args[i + 1])
+                except Exception:
+                    return CommandResponse(messages=[("system", "--decimals must be an integer between 0 and 9")])
+                i += 2
+                continue
+            if tok == "--supply" and i + 1 < len(args):
+                quick_supply = args[i + 1]
+                i += 2
                 continue
             return CommandResponse(messages=[("system", f"Unknown or misplaced argument '{tok}'.")])
 
@@ -126,6 +150,17 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 key = chosen.strip().lower()
                 if key not in KNOWN_KEYS:
                     return CommandResponse(messages=[("system", f"Invalid key '{key}'. Available: {options}")])
+
+        # Fast path: agent or power-user requested quick mint directly via flags
+        if key == "token" and quick_mode:
+            if quick_decimals is None or quick_supply is None:
+                return CommandResponse(messages=[("system", "Missing --decimals or --supply for quick token flow.")])
+            return _spl_token_quick_flow(
+                app,
+                decimals_input=quick_decimals,
+                supply_input=quick_supply,
+                cluster_hint=cluster,
+            )
 
         # Wizard (load per-blueprint schema if available)
         defaults = app._default_template_metadata()
