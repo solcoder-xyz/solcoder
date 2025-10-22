@@ -11,8 +11,20 @@ This is a stubbed Anchor workspace for an NFT-related program. It includes a min
   ```bash
   anchor build
   ```
-- Deploy and update Anchor.toml `programs.{{CLUSTER}}` with the deployed program id.
-- Interact using SolCoder:
-  - `/deploy` once adapters are active
-  - `/program inspect <PROGRAM_ID>` to view instructions
+- Verify (inside SolCoder):
+  ```
+  /deploy verify
+  ```
+  Checks toolchain, wallet, cluster, and Program ID consistency.
 
+- Deploy (Anchor):
+  ```bash
+  anchor deploy
+  ```
+  Ensure `declare_id!` and `Anchor.toml [programs.{{CLUSTER}}]` are set to your program’s public key.
+
+- Metadata & minting:
+  Use Metaplex tooling (e.g., Umi or metaboss) to register metadata and mint NFTs for real use. See `scripts/mint.ts` for reading `blueprint.answers.json`.
+
+- Interact using SolCoder:
+  - `/program inspect <PROGRAM_ID>` to view instructions

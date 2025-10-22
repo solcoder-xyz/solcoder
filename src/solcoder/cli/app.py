@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.formatted_text import ANSI
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -234,9 +235,21 @@ class CLIApp:
         bottom_toolbar = (
             self.status_bar.toolbar if self.status_bar.supports_toolbar else None
         )
+        # Key bindings: Enter sends, Ctrl+J inserts newline (Shift+Enter is not reliably detectable in terminals)
+        kb = KeyBindings()
+
+        @kb.add("enter")
+        def _(event) -> None:  # type: ignore[override]
+            event.current_buffer.validate_and_handle()
+
+        @kb.add("c-j")
+        def _(event) -> None:  # type: ignore[override]
+            event.current_buffer.insert_text("\n")
+
         self.session = PromptSession(
             history=FileHistory(str(history_path)),
             bottom_toolbar=bottom_toolbar,
+            key_bindings=kb,
         )
         self.log_buffer.subscribe(lambda _entry: self._refresh_status_bar())
         register_builtin_commands(self, self.command_router)
@@ -407,6 +420,8 @@ class CLIApp:
 
             with self.console.status("Running environment diagnostics...", spinner="dots"):
                 diagnostics = collect_environment_diagnostics()
+                # Cache for agent system-prompt context
+                setattr(self, "_last_diagnostics", diagnostics)
         except Exception as exc:  # noqa: BLE001
             logger.debug("Environment diagnostics failed during bootstrap: %s", exc)
             return False
@@ -708,6 +723,49 @@ class CLIApp:
         return self.context_manager.force_compact_history()
 
     def _chat_with_llm(self, prompt: str) -> CommandResponse:
+        # Build runtime context for the agent system prompt
+        runtime_ctx_parts: list[str] = []
+        try:
+            cfg = self.config_context.config if self.config_context else None
+            if cfg is not None:
+                net = getattr(cfg, "network", None)
+                rpc = getattr(cfg, "rpc_url", None)
+                if net:
+                    runtime_ctx_parts.append(f"network={net}")
+                if rpc:
+                    runtime_ctx_parts.append(f"rpc_url={rpc}")
+        except Exception:
+            pass
+        try:
+            wstatus = self.wallet_manager.status()
+            if wstatus.public_key:
+                runtime_ctx_parts.append(f"wallet={wstatus.public_key}")
+            # Indicate signer availability (unlocked or not)
+            meta_status = self.session_context.metadata.wallet_status or ""
+            if "Unlocked" in meta_status:
+                runtime_ctx_parts.append("signer=available")
+            elif wstatus.exists:
+                runtime_ctx_parts.append("signer=locked")
+            bal = self.session_context.metadata.wallet_balance
+            if bal is not None:
+                runtime_ctx_parts.append(f"balance={bal:.3f}SOL")
+        except Exception:
+            pass
+        try:
+            last_diags = getattr(self, "_last_diagnostics", None)
+            if last_diags:
+                wanted = {"Solana CLI": "solana", "Anchor": "anchor", "SPL Token CLI": "spl-token"}
+                pieces: list[str] = []
+                for item in last_diags:
+                    if item.name in wanted:
+                        state = "OK" if item.found and item.status == "ok" else item.status.upper()
+                        pieces.append(f"{wanted[item.name]}={state}")
+                if pieces:
+                    runtime_ctx_parts.append("tools:" + ",".join(pieces))
+        except Exception:
+            pass
+        env_summary = "; ".join(runtime_ctx_parts) if runtime_ctx_parts else None
+
         context = AgentLoopContext(
             prompt=prompt,
             history=self.context_manager.conversation_history(),
@@ -721,6 +779,7 @@ class CLIApp:
             todo_manager=self.todo_manager,
             initial_todo_message=self._todo_history_snapshot(),
             max_iterations=self._max_agent_iterations(),
+            env_summary=env_summary,
         )
         try:
             return run_agent_loop(context)
@@ -971,7 +1030,11 @@ class CLIApp:
             balance = rpc_client.get_balance(status.public_key)
         except Exception:
             balance = None
-        if balance is None or balance >= float(min_balance or 0.0):
+        # Trigger when balance <= threshold (so 0.0 works); bail only if above threshold
+        if balance is None:
+            return
+        threshold = float(min_balance or 0.0)
+        if float(balance) > threshold:
             return
         # Cooldown check
         last = getattr(self.session_context.metadata, "last_airdrop_at", None)
@@ -980,16 +1043,8 @@ class CLIApp:
             if elapsed < float(cooldown or 0):
                 return
         # Prompt or auto-execute
-        should_airdrop = auto
+        # Respect auto toggle: if disabled, do nothing (no prompting)
         if not auto:
-            try:
-                answer = self._prompt_text(
-                    f"Balance low ({balance:.3f} SOL). Request {amount:.3f} SOL airdrop now? (y/N)"
-                ).strip().lower()
-            except Exception:
-                answer = "n"
-            should_airdrop = answer in {"y", "yes"}
-        if not should_airdrop:
             return
         # Execute airdrop with retry/backoff and poll for update
         address = status.public_key

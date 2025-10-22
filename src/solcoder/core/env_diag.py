@@ -106,6 +106,17 @@ REQUIRED_TOOLS: tuple[ToolRequirement, ...] = (
         version_args=["--version"],
         remediation="Install pip with `python3 -m ensurepip --upgrade`.",
     ),
+    ToolRequirement(
+        name="SPL Token CLI",
+        executable="spl-token",
+        version_args=["--version"],
+        remediation=(
+            "Install with `cargo install spl-token-cli` and ensure `$HOME/.cargo/bin` is on your PATH."
+        ),
+        fallback_paths=(
+            "~/.cargo/bin/spl-token",
+        ),
+    ),
 )
 
 

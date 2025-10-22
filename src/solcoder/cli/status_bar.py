@@ -98,6 +98,14 @@ class StatusBar:
         metadata = self._context_manager.session_context.metadata
         session_id = metadata.session_id
         workspace_display = self._workspace_resolver() or "unknown"
+        # Truncate overly long workspace paths for a tidy status bar
+        def _truncate_middle(text: str, max_len: int = 60) -> str:
+            if len(text) <= max_len:
+                return text
+            head = max_len // 2 - 1
+            tail = max_len - head - 1
+            return f"{text[:head]}…{text[-tail:]}"
+        workspace_display = _truncate_middle(workspace_display)
         network = "unknown"
         if self._context_manager.config_context is not None:
             network = getattr(self._context_manager.config_context.config, "network", "unknown") or "unknown"

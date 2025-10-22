@@ -33,9 +33,21 @@ This template scaffolds a simple Anchor program that tracks a signed integer cou
    anchor build
    ```
 
-5. Update `Anchor.toml` with the deployed program ID after running `anchor deploy`.
+5. Verify configuration (inside SolCoder):
 
-6. Run the included test suite with `anchor test` to verify behavior.
+   ```
+   /deploy verify
+   ```
+   This checks toolchain, wallet, cluster, and Program ID consistency (declare_id! and Anchor.toml mapping).
+
+6. Deploy the program:
+
+   ```bash
+   anchor deploy
+   ```
+   If you haven’t set a real Program ID yet, generate one and update both declare_id! and Anchor.toml’s `[programs.{{CLUSTER}}]` mapping. Task 2.4 adapters will automate this.
+
+7. Run the included test suite with `anchor test` to verify behavior.
 
 ## Account Layout
 
@@ -47,3 +59,9 @@ This template scaffolds a simple Anchor program that tracks a signed integer cou
 ## Client Stub
 
 Use the generated `client/counter.ts` script as a starting point for interacting with the program from TypeScript.
+
+## Next Steps
+- Inspect on-chain IDL and instructions:
+  - `/program inspect <PROGRAM_ID>`
+- Try the sample script after deploying and setting the correct IDL:
+  - `node client/counter.ts`

@@ -161,6 +161,14 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         # Persist active project and return summary
         app.session_context.metadata.active_project = str(workspace_root)
         app.session_manager.save(app.session_context)
+        # Persist as project-level default for future sessions
+        try:
+            # Find project .solcoder directory relative to CWD
+            project_home = Path.cwd() / ".solcoder"
+            project_home.mkdir(parents=True, exist_ok=True)
+            (project_home / "active_workspace").write_text(str(workspace_root))
+        except Exception:
+            pass
         app.log_event("build", f"Anchor workspace initialized at {workspace_root}")
         summary = (
             f"Anchor workspace initialized at {workspace_root}.\n"

@@ -52,6 +52,7 @@ class AgentLoopContext:
     todo_manager: TodoManager | None = None
     initial_todo_message: str | None = None
     max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS
+    env_summary: str | None = None
 
 
 def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
@@ -64,7 +65,11 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     manifest_json = manifest_to_prompt_section(manifest)
     exec_ua_header = build_exec_ua_header()
     system_prompt = _agent_system_prompt(
-        ctx.config_context, manifest_json, exec_ua_header, ctx.todo_manager
+        ctx.config_context,
+        manifest_json,
+        exec_ua_header,
+        ctx.todo_manager,
+        runtime_context=ctx.env_summary,
     )
 
     loop_history = list(ctx.history)
@@ -827,6 +832,7 @@ def _agent_system_prompt(
     manifest_json: str,
     exec_ua_header: str,
     todo_manager: TodoManager | None = None,
+    runtime_context: str | None = None,
 ) -> str:
     provider_name, model_name, reasoning_effort = _active_model_details(config_context)
     schema_description = (
@@ -898,6 +904,8 @@ def _agent_system_prompt(
     rules += (
         "\nGood example: {\"type\":\"tool_request\",\"step_title\":\"List files\",\"tool\":{\"name\":\"execute_shell_command\",\"args\":{\"command\":\"ls -la\"}}}.\n"
         "Bad example: 'Sure, here is the command:' followed by raw shell text.\n\n"
+        "Preference: For SPL token operations, rely on guided SolCoder workflows or documented scripts instead of ad-hoc "
+        "shell commands to keep signer and RPC configuration consistent.\n"
     )
 
     return (
@@ -909,10 +917,11 @@ def _agent_system_prompt(
         f"{rules}"
         f"Current configuration: provider={provider_name}, model={model_name}, "
         f"reasoning_effort={reasoning_effort}.\n"
-        f"{exec_ua_header}\n"
-        f"Available tools: {manifest_json}\n"
-        "During the conversation you may also receive JSON objects with "
-        '{"type":"tool_result",...}. Use them to inform the next action.'
+        + (f"Runtime context: {runtime_context}\n" if runtime_context else "")
+        + f"{exec_ua_header}\n"
+        + f"Available tools: {manifest_json}\n"
+        + "During the conversation you may also receive JSON objects with "
+        + '{"type":"tool_result",...}. Use them to inform the next action.'
     )
 
 

@@ -18,7 +18,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
 
     def handle(app: CLIApp, args: list[str]) -> CommandResponse:
         if not args:
-            return CommandResponse(messages=[("system", "Usage: /session export <id>")])
+            return CommandResponse(messages=[("system", "Usage: /session export <id> | /session set project <path>")])
 
         command, *rest = args
         if command.lower() == "export":
@@ -51,11 +51,61 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             content = format_export_text(export_data)
             return CommandResponse(messages=[("system", content)], tool_calls=tool_summary)
 
+        if command.lower() == "set":
+            if len(rest) < 2:
+                return CommandResponse(messages=[("system", "Usage: /session set project <path>")])
+            target_key = rest[0].lower()
+            if target_key != "project":
+                return CommandResponse(messages=[("system", "Unknown setting. Try: /session set project <path>")])
+            target_path = rest[1]
+            from pathlib import Path
+
+            p = Path(target_path).expanduser()
+            try:
+                p = p.resolve()
+            except Exception:
+                p = p.expanduser()
+
+            if not (p / "Anchor.toml").exists():
+                return CommandResponse(
+                    messages=[
+                        (
+                            "system",
+                            f"Path '{p}' does not look like an Anchor workspace (missing Anchor.toml).",
+                        )
+                    ]
+                )
+
+            # Update active project in the current session
+            app.session_context.metadata.active_project = str(p)
+            app.session_manager.save(app.session_context)
+
+            # Persist as project-level default for future sessions
+            try:
+                project_home = Path.cwd() / ".solcoder"
+                project_home.mkdir(parents=True, exist_ok=True)
+                (project_home / "active_workspace").write_text(str(p))
+            except Exception:
+                # Best-effort; ignore persistence errors
+                pass
+
+            tool_summary = [
+                {
+                    "type": "command",
+                    "name": "/session set project",
+                    "status": "success",
+                    "summary": f"Active workspace set to {p}",
+                }
+            ]
+            return CommandResponse(
+                messages=[("system", f"Active workspace set to {p}.")], tool_calls=tool_summary
+            )
+
         if command.lower() == "compact":
             summary = app.force_compact_history()
             return CommandResponse(messages=[("system", summary)])
 
-        return CommandResponse(messages=[("system", "Unknown session command. Try `/session export <id>`.")])
+        return CommandResponse(messages=[("system", "Unknown session command. Try `/session export <id>` or `/session set project <path>`.")])
 
     router.register(SlashCommand("session", handle, "Session utilities"))
 

@@ -141,6 +141,16 @@ INSTALLER_SPECS: dict[str, InstallerSpec] = {
         verification_targets=("Yarn",),
         required=False,
     ),
+    "spl-token": InstallerSpec(
+        key="spl-token",
+        display_name="SPL Token CLI",
+        command_map={
+            "macos": ("cargo install spl-token-cli",),
+            "linux": ("cargo install spl-token-cli",),
+        },
+        verification_targets=("SPL Token CLI",),
+        required=False,
+    ),
 }
 
 
