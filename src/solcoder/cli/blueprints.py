@@ -46,8 +46,60 @@ def load_wizard_schema(key: str) -> list[dict[str, Any]]:
     data = json.loads(schema_path.read_text())
     return list(data.get("questions") or [])
 
+def resolve_registry_template_path(path_str: str) -> Path | None:
+    """Resolve a registry template path relative to the installed package.
 
-def prompt_wizard(app, questions: list[dict[str, Any]], defaults: dict[str, str]) -> dict[str, Any]:
+    The registry stores relative paths like "templates/token". When SolCoder
+    is launched from an arbitrary CWD, resolving relative to CWD breaks. This helper
+    resolves against package roots so pip-installed users work reliably.
+    """
+    p = Path(path_str)
+    if p.is_absolute():
+        return p if p.exists() else None
+    # Candidate bases: package root (…/solcoder), its parent (…/src), and repo root (parent of src)
+    candidates: list[Path] = []
+    try:
+        pkg_root = BLUEPRINTS_ROOT.parent.parent  # …/solcoder
+        candidates.append(pkg_root)
+        candidates.append(pkg_root.parent)        # …/src
+        candidates.append(pkg_root.parent.parent) # repo root
+    except Exception:
+        pass
+    for base in candidates:
+        try:
+            candidate = (base / p).resolve()
+        except Exception:
+            continue
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _should_ask_question(
+    question: dict[str, Any],
+    answers: dict[str, Any],
+    defaults: dict[str, Any],
+) -> bool:
+    condition = question.get("when")
+    if not condition:
+        return True
+    key = condition.get("key")
+    if not key:
+        return True
+    expected = condition.get("equals")
+    value = answers.get(key, defaults.get(key))
+    if expected is None:
+        return value is not None
+    if isinstance(expected, list):
+        normalized_expected = {str(item).lower() for item in expected}
+    else:
+        normalized_expected = {str(expected).lower()}
+    if value is None:
+        return False
+    return str(value).lower() in normalized_expected
+
+
+def prompt_wizard(app, questions: list[dict[str, Any]], defaults: dict[str, Any]) -> dict[str, Any]:
     answers: dict[str, Any] = {}
     for q in questions:
         key = q.get("key")
@@ -55,6 +107,8 @@ def prompt_wizard(app, questions: list[dict[str, Any]], defaults: dict[str, str]
         default = q.get("default")
         pattern = q.get("pattern")
         if key is None or prompt is None:
+            continue
+        if not _should_ask_question(q, answers, defaults):
             continue
         if key in defaults:
             default = defaults[key]

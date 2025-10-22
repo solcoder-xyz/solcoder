@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from rich.console import Console
 
 from solcoder.cli.app import CLIApp
 from solcoder.session.manager import SessionManager
-from solcoder.solana.wallet import WalletManager
+from solcoder.solana.wallet import WalletManager, WalletStatus
 
 
 def _make_app(tmp_path: Path) -> CLIApp:
@@ -20,7 +21,12 @@ def _make_app(tmp_path: Path) -> CLIApp:
         wallet_manager=wallet_manager,
     )
     # Stub prompt_text to return defaults during tests (avoid interactive wizard)
-    app._prompt_text = lambda message: ""  # type: ignore[assignment]
+    def _default_prompt(message: str) -> str:
+        if "Token type" in message:
+            return "program"
+        return ""
+
+    app._prompt_text = _default_prompt  # type: ignore[assignment]
     return app
 
 
@@ -37,8 +43,9 @@ def test_new_inserts_program_into_existing_anchor_workspace(tmp_path: Path) -> N
     # Insert token blueprint as program named my_token
     app.handle_line(f"/new token --dir {ws} --program my_token --force")
 
-    # Program folder created
+    # Program folder and scripts created
     assert (ws / "programs" / "my_token").is_dir()
+    assert (ws / "scripts").is_dir()
     # Anchor.toml patched with programs.devnet entry
     anchor_text = (ws / "Anchor.toml").read_text()
     assert "[programs.devnet]" in anchor_text
@@ -62,3 +69,83 @@ def test_new_scaffolds_workspace_when_no_anchor_detected(tmp_path: Path) -> None
     assert (dest / "scripts" / "mint.ts").exists()
     # Active project updated
     assert app.session_context.metadata.active_project == str(dest)
+
+
+def test_new_uses_active_workspace_when_no_dir_specified(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    # Create an Anchor workspace and set as active project
+    ws = tmp_path / "active_ws"
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "Anchor.toml").write_text("[workspace]\n\n[provider]\ncluster = \"devnet\"\n")
+    (ws / "Cargo.toml").write_text("[workspace]\nmembers = [\n]\n")
+    (ws / "programs").mkdir()
+    app.session_context.metadata.active_project = str(ws)
+    app.session_manager.save(app.session_context)
+
+    # Run /new without --dir; should insert into active workspace
+    app.handle_line("/new token --program my_tok --force")
+    assert (ws / "programs" / "my_tok").is_dir()
+
+
+def test_new_token_quick_flow(monkeypatch, tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+
+    mint_address = "Mint1111111111111111111111111111111111"
+    ata_address = "ATA11111111111111111111111111111111111"
+
+    prompts = {
+        "Token type": "quick",
+        "Decimals": "6",
+        "Initial supply": "123.45",
+        "Confirm": "mint",
+    }
+
+    def _prompt_text(message: str) -> str:
+        for key, value in prompts.items():
+            if message.startswith(key):
+                return value
+        return ""
+
+    app._prompt_text = _prompt_text  # type: ignore[assignment]
+    app._prompt_secret = lambda *args, **kwargs: "passphrase"  # type: ignore[assignment]
+
+    wallet_status = WalletStatus(
+        exists=True,
+        public_key="FAKEPUBKEY1234567890",
+        is_unlocked=False,
+        wallet_path=tmp_path / "wallet.json",
+    )
+    monkeypatch.setattr(app.wallet_manager, "status", lambda: wallet_status)
+    monkeypatch.setattr(app.wallet_manager, "export_wallet", lambda passphrase: "[1,2,3]")
+    monkeypatch.setattr("solcoder.cli.commands.new.shutil.which", lambda _: "/usr/bin/spl-token")
+
+    commands: list[list[str]] = []
+
+    def _fake_run(cmd, *, capture_output, text, check):
+        commands.append(cmd)
+        if cmd[1] == "create-token":
+            stdout = f"{{\n  \"address\": \"{mint_address}\", \"signature\": \"SigToken\"\n}}\n"
+        elif cmd[1] == "create-account":
+            stdout = f"{{\n  \"address\": \"{ata_address}\", \"signature\": \"SigAccount\"\n}}\n"
+        elif cmd[1] == "mint":
+            stdout = "{\n  \"signature\": \"SigMint\"\n}\n"
+        else:
+            raise AssertionError(f"Unexpected command {cmd}")
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr("solcoder.cli.commands.new.subprocess.run", _fake_run)
+
+    response = app.handle_line("/new token")
+
+    assert [cmd[1] for cmd in commands] == ["create-token", "create-account", "mint"]
+    assert "--decimals" in commands[0] and "6" in commands[0]
+    assert "--program-2022" in commands[0]
+    assert "--program-2022" in commands[1]
+    assert "--program-2022" in commands[2]
+    assert commands[2][-1] == ata_address
+
+    combined = "\n".join(message for _, message in response.messages)
+    assert "Quick SPL token created" in combined
+    assert f"Mint: {mint_address}" in combined
+    assert "Minted 123.45 tokens" in combined
+    assert f"Explorer: https://explorer.solana.com/address/{mint_address}?cluster=devnet" in combined

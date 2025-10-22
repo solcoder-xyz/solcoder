@@ -1,9 +1,39 @@
 {
   "questions": [
-    {"key": "program_name", "prompt": "Program name", "default": "token", "pattern": "^[a-zA-Z0-9_-]+$"},
-    {"key": "token_name", "prompt": "Token name", "default": "SolCoder Token"},
-    {"key": "symbol", "prompt": "Symbol", "default": "SCT", "pattern": "^[A-Z0-9]{1,10}$"},
-    {"key": "decimals", "prompt": "Decimals", "default": 9}
+    {
+      "key": "token_mode",
+      "prompt": "Token type (quick/program)",
+      "default": "quick",
+      "pattern": "^(quick|program)$"
+    },
+    {
+      "key": "program_name",
+      "prompt": "Program name",
+      "default": "token",
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "when": {"key": "token_mode", "equals": ["program"]}
+    },
+    {
+      "key": "token_name",
+      "prompt": "Token name",
+      "default": "SolCoder Token",
+      "when": {"key": "token_mode", "equals": ["program"]}
+    },
+    {
+      "key": "symbol",
+      "prompt": "Symbol",
+      "default": "SCT",
+      "pattern": "^[A-Z0-9]{1,10}$",
+      "when": {"key": "token_mode", "equals": ["program"]}
+    },
+    {"key": "decimals", "prompt": "Decimals", "default": 9},
+    {"key": "initial_supply", "prompt": "Initial supply (tokens)", "default": 0},
+    {
+      "key": "register_metadata",
+      "prompt": "Register metadata? (yes/no)",
+      "default": "no",
+      "pattern": "^(yes|no)$",
+      "when": {"key": "token_mode", "equals": ["program"]}
+    }
   ]
 }
-
