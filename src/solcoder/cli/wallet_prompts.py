@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.history import InMemoryHistory
 from rich.console import Console
 
 
@@ -22,6 +23,10 @@ def prompt_secret(
         return master_passphrase
 
     while True:
+        # Temporarily disable persistent history to avoid storing secrets.
+        old_history = getattr(session.default_buffer, "history", None)
+        try:
+            session.default_buffer.history = InMemoryHistory()  # type: ignore[assignment]
         try:
             value = session.prompt(f"{message}: ", is_password=True)
             if not confirmation:
@@ -38,6 +43,13 @@ def prompt_secret(
                     session.default_buffer.is_password = False  # type: ignore[attr-defined]
                 if hasattr(session.default_buffer, "password"):
                     session.default_buffer.password = False  # type: ignore[attr-defined]
+            except Exception:
+                pass
+        finally:
+            # Restore original history provider
+            try:
+                if old_history is not None:
+                    session.default_buffer.history = old_history  # type: ignore[assignment]
             except Exception:
                 pass
 
