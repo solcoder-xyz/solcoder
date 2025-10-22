@@ -908,6 +908,10 @@ def _agent_system_prompt(
         "Specifically, prefer the 'solcoder.token.create_quick_token' tool to stage a quick Token‑2022 mint, which will "
         "dispatch '/new token --quick --decimals … --supply …' for interactive confirmation. Do NOT instruct the user to run raw "
         "commands; the CLI will prompt for passphrase and confirmation.\n"
+        "For scaffolding new programs (counter, token, nft, registry), use the blueprint tools instead of raw shell: "
+        "First call 'solcoder.blueprint.get_wizard_questions' to learn required fields (e.g., program_name, name, symbol, uri). "
+        "Collect missing answers from the user, then create the program via 'solcoder.blueprint.create_program_blueprint'. "
+        "Optionally call 'solcoder.blueprint.check_program_exists' first to avoid name collisions; if exists, ask user to pick a different name.\n"
     )
 
     return (

@@ -42,7 +42,30 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 i += 2
                 continue
             if tok == "--workspace" and i + 1 < len(args):
-                workspace = Path(args[i + 1]).expanduser()
+                ws_arg = args[i + 1]
+                if ws_arg.strip().lower() == "auto":
+                    # Resolve from active project or Anchor.toml upward from CWD
+                    active = getattr(app.session_context.metadata, "active_project", None)
+                    if active and (Path(active).expanduser() / "Anchor.toml").exists():
+                        workspace = Path(active).expanduser()
+                    else:
+                        # Try detect from current working directory
+                        def _find_anchor_root(start: Path) -> Path | None:
+                            try:
+                                cur = start.resolve()
+                            except Exception:
+                                cur = start.expanduser()
+                            for parent in [cur, *cur.parents]:
+                                if (parent / "Anchor.toml").exists():
+                                    return parent
+                            return None
+                        detected = _find_anchor_root(Path.cwd())
+                        if detected is not None:
+                            workspace = detected
+                        else:
+                            workspace = None
+                else:
+                    workspace = Path(ws_arg).expanduser()
                 i += 2
                 continue
             if tok == "--answers-json" and i + 1 < len(args):

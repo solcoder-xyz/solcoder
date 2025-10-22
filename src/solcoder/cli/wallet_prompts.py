@@ -27,24 +27,24 @@ def prompt_secret(
         old_history = getattr(session.default_buffer, "history", None)
         try:
             session.default_buffer.history = InMemoryHistory()  # type: ignore[assignment]
-        try:
-            value = session.prompt(f"{message}: ", is_password=True)
-            if not confirmation:
-                return value
-            confirm = session.prompt("Confirm passphrase: ", is_password=True)
-            if value == confirm:
-                return value
-            console.print("[red]Passphrases do not match. Try again.[/red]")
-        finally:
-            # Ensure subsequent prompts are not masked in case PromptSession retains the flag
             try:
-                # Newer prompt_toolkit uses `.is_password`; older may use `.password`
-                if hasattr(session.default_buffer, "is_password"):
-                    session.default_buffer.is_password = False  # type: ignore[attr-defined]
-                if hasattr(session.default_buffer, "password"):
-                    session.default_buffer.password = False  # type: ignore[attr-defined]
-            except Exception:
-                pass
+                value = session.prompt(f"{message}: ", is_password=True)
+                if not confirmation:
+                    return value
+                confirm = session.prompt("Confirm passphrase: ", is_password=True)
+                if value == confirm:
+                    return value
+                console.print("[red]Passphrases do not match. Try again.[/red]")
+            finally:
+                # Ensure subsequent prompts are not masked in case PromptSession retains the flag
+                try:
+                    # Newer prompt_toolkit uses `.is_password`; older may use `.password`
+                    if hasattr(session.default_buffer, "is_password"):
+                        session.default_buffer.is_password = False  # type: ignore[attr-defined]
+                    if hasattr(session.default_buffer, "password"):
+                        session.default_buffer.password = False  # type: ignore[attr-defined]
+                except Exception:
+                    pass
         finally:
             # Restore original history provider
             try:

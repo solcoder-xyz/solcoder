@@ -1,0 +1,8 @@
+[workspace]
+
+[provider]
+cluster = "devnet"
+
+[programs.devnet]
+nft = "replace-with-program-id"
+
