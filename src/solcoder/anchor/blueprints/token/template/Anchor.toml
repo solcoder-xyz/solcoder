@@ -1,0 +1,17 @@
+[workspace]
+members = [
+  "programs/{{PROGRAM_NAME_SNAKE}}"
+]
+
+[programs.devnet]
+{{PROGRAM_NAME_SNAKE}} = "{{PROGRAM_ID}}"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "{{CLUSTER}}"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "anchor test"

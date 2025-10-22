@@ -28,6 +28,9 @@
     },
     {"key": "decimals", "prompt": "Decimals", "default": 9},
     {"key": "initial_supply", "prompt": "Initial supply (tokens)", "default": 0},
+    {"key": "transfer_fee_bps", "prompt": "Token-2022: transfer fee (bps, optional)", "default": "", "pattern": "^$|^\\d{1,4}$"},
+    {"key": "interest_rate_bps", "prompt": "Token-2022: interest rate (bps, optional)", "default": "", "pattern": "^$|^\\d{1,4}$"},
+    {"key": "metadata_pointer_uri", "prompt": "Token-2022: metadata pointer URI (optional)", "default": ""},
     {
       "key": "register_metadata",
       "prompt": "Register metadata? (yes/no)",

@@ -1,0 +1,12 @@
+[package]
+name = "{{PROGRAM_NAME_SNAKE}}"
+version = "0.1.0"
+edition = "2021"
+description = "Anchor NFT scaffolded by SolCoder"
+
+[lib]
+name = "{{PROGRAM_NAME_SNAKE}}"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+anchor-lang = { workspace = true }
