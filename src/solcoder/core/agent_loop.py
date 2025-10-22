@@ -910,8 +910,9 @@ def _agent_system_prompt(
         "commands; the CLI will prompt for passphrase and confirmation.\n"
         "For scaffolding new programs (counter, token, nft, registry), use the blueprint tools instead of raw shell: "
         "First call 'solcoder.blueprint.get_wizard_questions' to learn required fields (e.g., program_name, name, symbol, uri). "
+        "If the user explicitly states a program name (e.g., 'create nft named foo'), use that exact value as program_name. "
         "Collect missing answers from the user, then create the program via 'solcoder.blueprint.create_program_blueprint'. "
-        "Optionally call 'solcoder.blueprint.check_program_exists' first to avoid name collisions; if exists, ask user to pick a different name.\n"
+        "Optionally call 'solcoder.blueprint.check_program_exists' first to avoid name collisions; if exists, ask the user to pick a different name.\n"
     )
 
     return (
