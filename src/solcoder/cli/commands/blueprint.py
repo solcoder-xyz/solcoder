@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING
 
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
 from solcoder.core import RenderOptions, TemplateError, render_template
-from solcoder.cli.blueprints import persist_answers_readme, normalise_program_name
+from solcoder.cli.blueprints import (
+    persist_answers_readme,
+    normalise_program_name,
+    resolve_registry_template_path,
+)
 import re
 import shutil
 
@@ -24,6 +28,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         target: Path | None = None
         workspace: Path | None = None
         answers_json: str | None = None
+        force: bool = False
 
         i = 1
         while i < len(args):
@@ -43,6 +48,10 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             if tok == "--answers-json" and i + 1 < len(args):
                 answers_json = args[i + 1]
                 i += 2
+                continue
+            if tok == "--force":
+                force = True
+                i += 1
                 continue
             return CommandResponse(messages=[("system", f"Unknown or misplaced arg '{tok}'.")])
 
@@ -66,39 +75,48 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         if workspace is not None and (workspace / "Anchor.toml").exists():
             with app.console.status(f"Adding '{program_name}' to Anchor workspace…", spinner="dots"):
                 import tempfile
-                tmpdir = Path(tempfile.mkdtemp())
-                try:
+
+                with tempfile.TemporaryDirectory() as tmpdir_str:
+                    tmpdir = Path(tmpdir_str)
+                    staging_root = tmpdir / "scaffold"
                     # Attempt to resolve registry template path if available
                     from solcoder.cli.blueprints import load_registry
+
                     reg = {e.key: e for e in load_registry()}
                     tpl_path = None
                     if key in reg and reg[key].template_path:
-                        try:
-                            tpl_path = Path(reg[key].template_path).expanduser().resolve()
-                        except Exception:
-                            tpl_path = None
+                        tpl_path = resolve_registry_template_path(reg[key].template_path)
                     opts = RenderOptions(
                         template=key,
-                        destination=tmpdir,
+                        destination=staging_root,
                         program_name=program_name,
                         author_pubkey=author,
                         cluster=cluster,
                         program_id=program_id,
-                        overwrite=True,
+                        overwrite=force,
                         template_path=tpl_path,
                     )
                     render_template(opts)
-                    src_prog = tmpdir / "programs" / normalise_program_name(program_name)
+                    src_prog = staging_root / "programs" / normalise_program_name(program_name)
                     dst_prog = workspace / "programs" / src_prog.name
                     if dst_prog.exists():
+                        if not force:
+                            return CommandResponse(messages=[("system", f"Program '{src_prog.name}' already exists. Re-run with --force to overwrite.")])
                         shutil.rmtree(dst_prog)
                     shutil.copytree(src_prog, dst_prog)
                     # copy tests
                     (workspace / "tests").mkdir(parents=True, exist_ok=True)
-                    for test_file in (tmpdir / "tests").glob("*.ts"):
+                    for test_file in (staging_root / "tests").glob("*.ts"):
                         shutil.copy2(test_file, workspace / "tests" / test_file.name)
+                    # copy scripts (helper demos)
+                    src_scripts = staging_root / "scripts"
+                    if src_scripts.exists():
+                        (workspace / "scripts").mkdir(parents=True, exist_ok=True)
+                        for script_file in src_scripts.glob("*"):
+                            if script_file.is_file():
+                                shutil.copy2(script_file, workspace / "scripts" / script_file.name)
                     # patch Anchor.toml
-                    anchor_toml = (workspace / "Anchor.toml")
+                    anchor_toml = workspace / "Anchor.toml"
                     text = anchor_toml.read_text()
                     sect = f"[programs.{cluster}]"
                     prog_line = f"{src_prog.name} = \"{program_id}\""
@@ -119,11 +137,6 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                             ctext += f"\n[workspace]\nmembers = [\n    {member},\n]\n"
                         cargo.write_text(ctext)
                     persist_answers_readme(workspace, answers)
-                finally:
-                    try:
-                        shutil.rmtree(tmpdir)
-                    except Exception:
-                        pass
 
             app.session_context.metadata.active_project = str(workspace)
             app.session_manager.save(app.session_context)
@@ -136,10 +149,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 reg = {e.key: e for e in load_registry()}
                 tpl_path = None
                 if key in reg and reg[key].template_path:
-                    try:
-                        tpl_path = Path(reg[key].template_path).expanduser().resolve()
-                    except Exception:
-                        tpl_path = None
+                    tpl_path = resolve_registry_template_path(reg[key].template_path)
                 opts = RenderOptions(
                     template=key,
                     destination=target,
@@ -147,7 +157,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     author_pubkey=author,
                     cluster=cluster,
                     program_id=program_id,
-                    overwrite=True,
+                    overwrite=force,
                     template_path=tpl_path,
                 )
                 output = render_template(opts)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 import json
 import logging
 import os
@@ -282,6 +283,26 @@ def _handle_dump_session(session_id: str, fmt: str, output: Path | None) -> None
     raise typer.Exit()
 
 
+ANCHOR_SCAN_SKIP_NAMES = {
+    ".git",
+    ".github",
+    ".idea",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".venv",
+    ".vscode",
+    ".solcoder",
+    "__pycache__",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "coverage",
+    "vendor",
+    "deps",
+}
+
+
 def _resolve_project_paths() -> tuple[Path, Path, Path]:
     project_root = Path.cwd()
     project_home = project_root / ".solcoder"
@@ -289,6 +310,58 @@ def _resolve_project_paths() -> tuple[Path, Path, Path]:
     global_home = DEFAULT_CONFIG_DIR
     global_home.mkdir(parents=True, exist_ok=True)
     return project_root, project_home, global_home
+
+
+def _detect_anchor_workspace(
+    root: Path,
+    *,
+    max_depth: int = 3,
+    max_nodes: int = 200,
+) -> Path | None:
+    """Search downward from root for a directory containing Anchor.toml."""
+    try:
+        base = root.resolve()
+    except Exception:
+        base = root.expanduser()
+
+    if (base / "Anchor.toml").exists():
+        return base
+
+    queue: deque[tuple[Path, int]] = deque([(base, 0)])
+    visited: set[Path] = set()
+    processed = 0
+
+    while queue and processed < max_nodes:
+        current, depth = queue.popleft()
+        if current in visited:
+            continue
+        visited.add(current)
+        processed += 1
+
+        if depth > 0 and (current / "Anchor.toml").exists():
+            return current
+
+        if depth >= max_depth:
+            continue
+
+        try:
+            children = sorted(current.iterdir(), key=lambda p: p.name.lower())
+        except Exception:
+            continue
+
+        for child in children:
+            if not child.is_dir():
+                continue
+            if child.is_symlink():
+                continue
+            name = child.name
+            if name in ANCHOR_SCAN_SKIP_NAMES:
+                continue
+            if name.startswith(".") and name not in {".anchor"}:
+                continue
+            queue.append((child, depth + 1))
+
+    return None
 
 
 def _show_balance(rpc_client: SolanaRPCClient | None, public_key: str | None) -> None:
@@ -639,18 +712,35 @@ def _launch_shell(
     wallet_manager = WalletManager(keys_dir=global_home / "keys")
     rpc_client = SolanaRPCClient(endpoint=config_context.config.rpc_url)
     airdrop_time = _bootstrap_wallet(wallet_manager, rpc_client, config_context.passphrase)
+
+    detected_workspace = _detect_anchor_workspace(project_root)
+    default_active = detected_workspace or project_root
+    try:
+        active_ws_file = project_home / "active_workspace"
+        if active_ws_file.exists():
+            candidate_text = active_ws_file.read_text().strip()
+            if candidate_text:
+                candidate_path = Path(candidate_text).expanduser()
+                if (candidate_path / "Anchor.toml").exists():
+                    default_active = candidate_path
+                elif detected_workspace is not None:
+                    default_active = detected_workspace
+    except Exception:
+        if detected_workspace is not None:
+            default_active = detected_workspace
+
     resume_id = None if new_session else session
     if resume_id:
         try:
-            session_context = session_manager.start(resume_id, active_project=str(project_root))
+            session_context = session_manager.start(resume_id, active_project=str(default_active))
         except FileNotFoundError:
             styled_echo(f"⚠️  Session '{resume_id}' not found; starting a new session.")
-            session_context = session_manager.start(active_project=str(project_root))
+            session_context = session_manager.start(active_project=str(default_active))
         except SessionLoadError as exc:
             styled_echo(f"⚠️  {exc}. Starting a new session.")
-            session_context = session_manager.start(active_project=str(project_root))
+            session_context = session_manager.start(active_project=str(default_active))
     else:
-        session_context = session_manager.start(active_project=str(project_root))
+        session_context = session_manager.start(active_project=str(default_active))
 
     # Persist bootstrap airdrop timestamp if any
     if airdrop_time is not None:
