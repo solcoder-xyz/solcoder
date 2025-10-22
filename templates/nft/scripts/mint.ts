@@ -1,36 +1,18 @@
-// Example script that reads wizard answers and displays NFT metadata settings.
-// This does not mint on-chain; use Metaplex or your Anchor client for minting.
+// Placeholder: demonstrate reading wizard answers and printing a suggested Umi flow.
+import fs from 'node:fs';
 
-import * as fs from "fs";
-import * as path from "path";
-
-function loadAnswers(root: string): any {
-  const p = path.join(root, "blueprint.answers.json");
-  try {
-    return JSON.parse(fs.readFileSync(p, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-async function main() {
-  const root = process.cwd();
-  const answers = loadAnswers(root);
-  const name = answers.name || "SolCoder NFT";
-  const symbol = answers.symbol || "SCN";
-  const uri = answers.uri || "https://example.com/metadata.json";
-
-  console.log("NFT metadata (from blueprint.answers.json):\n");
-  console.log(`  Name  : ${name}`);
-  console.log(`  Symbol: ${symbol}`);
-  console.log(`  URI   : ${uri}`);
-  console.log("\nNext steps:");
-  console.log("  - Use Metaplex or your Anchor client to create a mint and set metadata.");
-  console.log("  - After deploy, run /program inspect <PROGRAM_ID> to explore instructions.");
-}
-
-main().catch((e) => {
-  console.error(e);
+const answersPath = 'blueprint.answers.json';
+if (!fs.existsSync(answersPath)) {
+  console.error('No blueprint.answers.json found');
   process.exit(1);
-});
+}
+const answers = JSON.parse(fs.readFileSync(answersPath, 'utf8'));
+const name = answers.name || 'SolCoder NFT';
+const symbol = answers.symbol || 'SCN';
+const uri = answers.uri || 'https://example.com/metadata.json';
+
+console.log('Suggested Umi (Token Metadata) flow:');
+console.log('- Create mint (decimals=0), then call createV1 with:');
+console.log(`  name=${name}, symbol=${symbol}, uri=${uri}`);
+console.log('See Task 2.3b for full integration.');
 

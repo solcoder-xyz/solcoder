@@ -23,12 +23,25 @@ This is a stubbed Anchor workspace for a token-related program. It includes a mi
   ```
   Ensure `declare_id!` and `Anchor.toml [programs.{{CLUSTER}}]` are set to your program’s public key.
 
-- Quick path (no custom program):
-  If you only need an SPL token mint without custom logic, use the Solana `spl-token` CLI directly:
+- Scripted flows (Token-2022)
+  This blueprint includes example scripts that demonstrate common SPL Token flows using the CLI:
+
+  - Create mint (Token-2022) and wallet ATA
+  - Mint to your ATA
+  - Transfer between ATAs
+
+  See `scripts/mint.ts` and `scripts/transfer.ts`. You can run them on devnet after configuring your wallet:
+
+  ```bash
+  # Ensure Solana/Anchor CLIs and spl-token are installed
+  solana config set -u devnet
+  node scripts/mint.ts
+  node scripts/transfer.ts
   ```
-  spl-token create-token
-  spl-token create-account <MINT>
-  spl-token mint <MINT> 1000000
+
+  If you only need a one-off mint without custom logic, you can also use SolCoder's quick flow:
+  ```
+  /new token --quick --decimals 0 --supply 1000000 --cluster devnet
   ```
 
 - Interact using SolCoder:

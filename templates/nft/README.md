@@ -24,7 +24,8 @@ This is a stubbed Anchor workspace for an NFT-related program. It includes a min
   Ensure `declare_id!` and `Anchor.toml [programs.{{CLUSTER}}]` are set to your program’s public key.
 
 - Metadata & minting:
-  Use Metaplex tooling (e.g., Umi or metaboss) to register metadata and mint NFTs for real use. See `scripts/mint.ts` for reading `blueprint.answers.json`.
+  Use Metaplex tooling (Umi or metaboss) to register metadata and mint NFTs.
+  Example script `scripts/mint.ts` demonstrates reading `blueprint.answers.json` and printing a suggested Umi command.
 
 - Interact using SolCoder:
   - `/program inspect <PROGRAM_ID>` to view instructions

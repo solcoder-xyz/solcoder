@@ -40,6 +40,17 @@ pub mod {{PROGRAM_NAME_SNAKE}} {
             .ok_or(CounterError::Overflow)?;
         Ok(())
     }
+
+    pub fn reset(ctx: Context<UpdateCounter>) -> Result<()> {
+        let counter = &mut ctx.accounts.counter;
+        require_keys_eq!(
+            counter.authority,
+            ctx.accounts.authority.key(),
+            CounterError::Unauthorized
+        );
+        counter.count = 0;
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]

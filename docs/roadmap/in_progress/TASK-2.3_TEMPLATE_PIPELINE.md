@@ -47,9 +47,10 @@ Connect templates to user prompts so `/new "<prompt>"` selects an Anchor bluepri
   - After selection, proceed with normal rendering flow and show the confirmation/summary.
 
 ### Layout & Registry
-- Store all blueprints under `src/solcoder/anchor/blueprints/`, one subfolder per key.
+- Store blueprint metadata and wizards under `src/solcoder/anchor/blueprints/`, one subfolder per key.
+- Store scaffoldable file content under `templates/<key>/` (copy-on-render). The renderer resolves registry `template_path` and copies files into the target workspace.
 - Maintain a simple blueprint registry (e.g., `src/solcoder/anchor/blueprints/registry.json`) with:
-  - `key`, `name`, `description`, `path`, `tags`, and `required_tools` fields.
+  - `key`, `name`, `description`, `template_path`, `tags`, and `required_tools` fields.
   - Used by `/new` to list available options and by the LLM selection prompt.
 - Keep `RenderOptions` compatible and map registry entries to renderer inputs.
 
