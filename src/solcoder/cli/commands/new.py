@@ -483,7 +483,8 @@ def _spl_token_quick_flow(
             "--url",
             rpc_url,
         ]
-        create_result = _run_cmd(create_token_cmd)
+        with app.console.status("Creating token mint (Token-2022)…", spinner="dots"):
+            create_result = _run_cmd(create_token_cmd)
         if create_result.returncode != 0:
             err = create_result.stderr.strip() or create_result.stdout.strip() or "spl-token create-token failed."
             return CommandResponse(messages=[("system", err)])
@@ -508,7 +509,8 @@ def _spl_token_quick_flow(
             "--url",
             rpc_url,
         ]
-        account_result = _run_cmd(create_account_cmd)
+        with app.console.status("Creating associated token account…", spinner="dots"):
+            account_result = _run_cmd(create_account_cmd)
         if account_result.returncode != 0:
             err = account_result.stderr.strip() or account_result.stdout.strip() or "spl-token create-account failed."
             return CommandResponse(messages=[("system", err)])
@@ -589,7 +591,8 @@ def _spl_token_quick_flow(
                 rpc_url,
             ]
             mint_cmd.append(account_address)
-            mint_result = _run_cmd(mint_cmd)
+            with app.console.status("Minting initial supply…", spinner="dots"):
+                mint_result = _run_cmd(mint_cmd)
             if mint_result.returncode != 0:
                 err = mint_result.stderr.strip() or mint_result.stdout.strip() or "spl-token mint failed."
                 return CommandResponse(messages=[("system", err)])
