@@ -1,0 +1,7 @@
+{
+  "questions": [
+    {"key": "program_name", "prompt": "Program name", "default": "counter", "pattern": "^[a-zA-Z0-9_-]+$"},
+    {"key": "initial_value", "prompt": "Initial counter value (optional)", "default": "", "pattern": "^$|^-?\\d+$"}
+  ]
+}
+

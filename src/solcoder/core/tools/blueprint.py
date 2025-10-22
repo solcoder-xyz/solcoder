@@ -110,6 +110,29 @@ def _check_program_exists_handler(payload: dict[str, Any]) -> ToolResult:
     if isinstance(workspace_root_val, str) and workspace_root_val.strip():
         workspace_root = Path(workspace_root_val).expanduser()
     if workspace_root is None:
+        # Try to detect from a persisted active workspace file in project .solcoder
+        def _find_active_workspace_file(start: Path) -> Path | None:
+            try:
+                cur = start.resolve()
+            except Exception:
+                cur = start.expanduser()
+            for parent in [cur, *cur.parents]:
+                candidate = parent / ".solcoder" / "active_workspace"
+                if candidate.exists():
+                    return candidate
+            return None
+
+        aw_file = _find_active_workspace_file(Path.cwd())
+        if aw_file is not None:
+            try:
+                text = (aw_file.read_text() or "").strip()
+                if text:
+                    p = Path(text).expanduser()
+                    if (p / "Anchor.toml").exists():
+                        workspace_root = p
+            except Exception:
+                workspace_root = None
+    if workspace_root is None:
         workspace_root = _find_anchor_root(Path.cwd())
     if workspace_root is None:
         return ToolResult(

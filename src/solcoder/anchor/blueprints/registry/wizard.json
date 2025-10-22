@@ -1,8 +1,8 @@
 {
   "questions": [
     {"key": "program_name", "prompt": "Program name", "default": "registry", "pattern": "^[a-zA-Z0-9_-]+$"},
-    {"key": "key_type", "prompt": "Key type (string|bytes|u64)", "default": "string"},
-    {"key": "value_type", "prompt": "Value type (string|bytes|u64)", "default": "string"}
+    {"key": "key_type", "prompt": "Key type (string|bytes|u64)", "default": "string", "pattern": "^(string|bytes|u64)$"},
+    {"key": "value_type", "prompt": "Value type (string|bytes|u64)", "default": "string", "pattern": "^(string|bytes|u64)$"}
   ]
 }
 

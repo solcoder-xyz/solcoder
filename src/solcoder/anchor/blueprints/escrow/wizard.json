@@ -1,7 +1,8 @@
 {
   "questions": [
     {"key": "program_name", "prompt": "Program name", "default": "escrow", "pattern": "^[a-zA-Z0-9_-]+$"},
-    {"key": "mint", "prompt": "Token mint (optional)", "default": ""}
+    {"key": "mint", "prompt": "Token mint (optional)", "default": ""},
+    {"key": "counterparty", "prompt": "Counterparty address (optional)", "default": ""}
   ]
 }
 
