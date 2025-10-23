@@ -98,8 +98,8 @@ def test_new_token_quick_flow(monkeypatch, tmp_path: Path) -> None:
         "Token type": "quick",
         "Decimals": "6",
         "Initial supply": "123.45",
-        "Write metadata on-chain now? (Y/n)": "y",
-        "Confirm": "mint",
+        "Write metadata on-chain now? [Y/n]": "y",
+        "Confirm (mint)": "mint",
     }
 
     def _prompt_text(message: str) -> str:

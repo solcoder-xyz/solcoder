@@ -11,6 +11,8 @@ import os
 import subprocess
 from typing import TYPE_CHECKING
 
+from rich.panel import Panel
+
 from solcoder.cli.blueprints import (
     load_registry,
     load_wizard_schema,
@@ -266,9 +268,19 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     decimals_value = answers.get("decimals", seed.get("decimals"))
                     supply_value = answers.get("initial_supply", seed.get("initial_supply"))
                     # Also collect metadata inline to avoid a second wizard step
+                    intro_lines = [
+                        "[bold cyan]Quick Token Mint[/bold cyan]",
+                        "Press Enter to accept the suggested value in brackets.",
+                        "[dim]Leave optional fields empty to skip them.[/dim]",
+                    ]
+                    app.console.print(Panel.fit("\n".join(intro_lines), title="Quick Token Wizard", border_style="cyan"))
+                    app.console.print()
+                    app.console.print("[bold]Token configuration[/bold]")
                     default_uri = (answers.get("metadata_pointer_uri") or "").strip()
                     meta_name = app._prompt_text("Metadata Name [SolCoder Token]").strip() or "SolCoder Token"
                     meta_symbol = app._prompt_text("Metadata Symbol [SCT]").strip() or "SCT"
+                    app.console.print()
+                    app.console.print("[bold]Metadata[/bold]")
                     meta_uri = app._prompt_text(f"Metadata URI [{default_uri or 'auto-generate'}]").strip() or default_uri
                     if not meta_uri:
                         # Auto-generate a local metadata.json and use its file:// URI
@@ -276,7 +288,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     meta_royalty = app._prompt_text("Seller fee bps (optional)").strip()
                     meta_creators = app._prompt_text("Creators 'PK:BPS,...' (optional)").strip()
                     meta_collection = app._prompt_text("Collection address (optional)").strip()
-                    meta_run_answer = app._prompt_text("Write metadata on-chain now? (Y/n)").strip().lower()
+                    meta_run_answer = app._prompt_text("Write metadata on-chain now? [Y/n]").strip().lower()
                     meta_run = meta_run_answer not in {"n", "no"}
                     return _spl_token_quick_flow(
                         app,
@@ -510,11 +522,12 @@ def _spl_token_quick_flow(
         f"  Decimals: {decimals}",
         f"  Initial supply: {supply_cli_str}",
         f"  Cluster: {cluster}",
-        "Type 'mint' to confirm or anything else to cancel.",
     ]
-    app.console.print("\n".join(summary_lines))
+    app.console.print(Panel.fit("\n".join(summary_lines), title="Review & Confirm", border_style="cyan"))
+    app.console.print("[bold yellow]Enter wallet passphrase to continue.[/bold yellow]")
     passphrase = app._prompt_secret("Wallet passphrase", allow_master=False)
-    ack = app._prompt_text("Confirm").strip().lower()
+    app.console.print("[bold yellow]Type 'mint' to proceed or press Enter to cancel.[/bold yellow]")
+    ack = app._prompt_text("Confirm (mint)").strip().lower()
     if ack != "mint":
         return CommandResponse(messages=[("system", "Cancelled.")])
 
@@ -804,6 +817,9 @@ def _spl_token_quick_flow(
     except Exception:
         pass
 
+    summary_text = "\n".join(lines)
+    app.console.print(Panel.fit(summary_text, title="Quick Token Result", border_style="green"))
+
     app.log_event("token", f"Quick SPL token created: {mint_address}")
     # If metadata parameters were provided, set metadata directly; otherwise launch wizard
     import shlex as _shlex
@@ -838,13 +854,12 @@ def _spl_token_quick_flow(
             "token",
         ]
     # Show success then dispatch metadata command
-    app.console.print("\n".join(lines))
     dispatch = " ".join(_shlex.quote(p) for p in md_cmd)
     try:
         routed = app.command_router.dispatch(app, dispatch[1:] if dispatch.startswith("/") else dispatch)
         if routed.messages:
-            routed.messages.insert(0, ("system", "\n".join(lines)))
+            routed.messages.insert(0, ("system", summary_text))
             return routed
-        return CommandResponse(messages=[("system", "\n".join(lines))])
+        return CommandResponse(messages=[("system", summary_text)])
     except Exception:
-        return CommandResponse(messages=[("system", "\n".join(lines))])
+        return CommandResponse(messages=[("system", summary_text)])

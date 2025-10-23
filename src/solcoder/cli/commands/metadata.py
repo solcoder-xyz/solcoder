@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from rich.panel import Panel
+
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
 from solcoder.cli.storage import bundlr_upload, ipfs_upload_nft_storage, ipfs_upload_dir_web3storage
 from solcoder.solana.constants import TOKEN_2022_PROGRAM_ID
@@ -547,9 +549,32 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             if not mint:
                 return CommandResponse(messages=[("system", "Usage: /metadata wizard --mint <MINT> [--type token|nft]")])
             # Ask minimal fields
-            name = app._prompt_text("Name").strip() or "Untitled"
-            symbol = app._prompt_text("Symbol").strip() or "TKN"
+            wizard_intro = [
+                "[bold magenta]Metadata Wizard[/bold magenta]",
+                "Press Enter to accept the suggested value in brackets.",
+                "[dim]Optional fields can be left blank.[/dim]",
+            ]
+            app.console.print(Panel.fit("\n".join(wizard_intro), title="Metadata Setup", border_style="magenta"))
+            app.console.print("")
+            app.console.print("[bold]Basics[/bold]")
+            defaults = {}
+            metadata_file = (_metadata_dir(app) / f"{mint}.json")
+            if metadata_file.exists():
+                try:
+                    defaults = json.loads(metadata_file.read_text())
+                except Exception:
+                    defaults = {}
+            name_default = (defaults.get("name") or "Untitled").strip()
+            symbol_default = (defaults.get("symbol") or "TKN").strip()
+            uri_default = (defaults.get("uri") or "").strip()
+            royalty_default = str(defaults.get("royalty_bps") or "").strip()
+            creators_default = (defaults.get("creators") or "").strip()
+            collection_default = (defaults.get("collection") or "").strip()
+            name = app._prompt_text(f"Name [{name_default}]").strip() or name_default
+            symbol = app._prompt_text(f"Symbol [{symbol_default}]").strip() or symbol_default
             # Storage preference and asset selection
+            app.console.print("")
+            app.console.print("[bold]Assets & Storage[/bold]")
             storage_pref = app._prompt_text("Storage (auto/bundlr/ipfs) [auto]").strip().lower() or "auto"
             asset_path = app._prompt_text("Asset (file or directory; leave blank to auto-generate)").strip()
             uri = ""
@@ -568,11 +593,46 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 if not uri:
                     app.console.print("[#F97316]Upload did not return a URI; falling back to manual URI entry.[/]")
             if not uri:
-                uri = app._prompt_text("Metadata URI (leave blank to auto-generate)").strip()
-            royalty_bps = app._prompt_text("Seller fee bps (optional)").strip()
-            creators = app._prompt_text("Creators 'PK:BPS,...' (optional)").strip()
-            collection = app._prompt_text("Collection address (optional)").strip()
-            do_run_answer = app._prompt_text("Write metadata on-chain now? (Y/n)").strip().lower()
+                uri_prompt_default = uri_default or "auto-generate"
+                uri_entry = app._prompt_text(f"Metadata URI [{uri_prompt_default}]").strip()
+                if uri_entry:
+                    uri = uri_entry
+                elif uri_prompt_default != "auto-generate":
+                    uri = uri_prompt_default
+                else:
+                    uri = ""
+            royalty_entry = app._prompt_text(f"Seller fee bps (optional) [{royalty_default or 'skip'}]").strip()
+            if royalty_entry and royalty_entry.lower() != "skip":
+                royalty_bps = royalty_entry
+            else:
+                royalty_bps = royalty_default if royalty_default else ""
+            creators_entry = app._prompt_text(f"Creators 'PK:BPS,...' (optional) [{creators_default or 'skip'}]").strip()
+            if creators_entry and creators_entry.lower() != "skip":
+                creators = creators_entry
+            else:
+                creators = creators_default
+            collection_entry = app._prompt_text(f"Collection address (optional) [{collection_default or 'skip'}]").strip()
+            if collection_entry and collection_entry.lower() != "skip":
+                collection = collection_entry
+            else:
+                collection = collection_default
+            app.console.print()
+            review_lines = [
+                "Metadata summary:",
+                f"  Mint      : {mint}",
+                f"  Name      : {name}",
+                f"  Symbol    : {symbol}",
+            ]
+            if uri:
+                review_lines.append(f"  URI       : {uri}")
+            if royalty_bps:
+                review_lines.append(f"  Royalty bps: {royalty_bps}")
+            if creators:
+                review_lines.append(f"  Creators  : {creators}")
+            if collection:
+                review_lines.append(f"  Collection: {collection}")
+            app.console.print(Panel.fit("\n".join(review_lines), title="Metadata Review", border_style="magenta"))
+            do_run_answer = app._prompt_text("Write metadata on-chain now? [Y/n]").strip().lower()
             do_run = do_run_answer not in {"n", "no"}
             # Dispatch to set
             import shlex as _shlex
@@ -764,7 +824,11 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                         if line.startswith("  URI"):
                             lines[idx] = f"  URI       : {args_obj.uri}"
                             break
-            return CommandResponse(messages=[("system", "\n".join(lines))])
+            summary_text = "\n".join(lines)
+            border = "green" if run_success else "yellow"
+            title = "Metadata On-Chain" if run_success else "Metadata Summary"
+            app.console.print(Panel.fit(summary_text, title=title, border_style=border))
+            return CommandResponse(messages=[("system", summary_text)])
 
         return CommandResponse(messages=[("system", "Unknown subcommand. Try '/metadata help'.")])
 
