@@ -1,7 +1,0 @@
-[workspace]
-
-[provider]
-cluster = "devnet"
-
-[programs.devnet]
-nft = "DFvzyv1onfttLVHT9DFXDPK1ckamcr7UgpxhhSCMP9ia"

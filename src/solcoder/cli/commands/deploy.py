@@ -133,6 +133,14 @@ def _handle_deploy(app: CLIApp, args: list[str]) -> CommandResponse:
     skip_build = opts.get("skip_build", False)
 
     try:
+        # Ensure provider wallet defaults are present for smoother anchor CLI usage.
+        if status.exists:
+            deploy_mod.ensure_provider_wallet(
+                anchor_path,
+                anchor_cfg,
+                wallet_path=status.wallet_path,
+                cluster=cluster,
+            )
         program_keypair, program_id = _prepare_program(workspace, program_name, cluster, anchor_path, anchor_cfg)
     except deploy_mod.DeployError as exc:
         return CommandResponse(messages=[("system", f"Program preparation failed: {exc}")])

@@ -90,6 +90,41 @@ def test_run_anchor_build_fallbacks_to_anchor_build(monkeypatch, tmp_path: Path)
     assert calls[1][:2] == ["anchor", "build"]
 
 
+def test_ensure_provider_wallet_sets_defaults(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    anchor = workspace / "Anchor.toml"
+    cfg = deploy.load_anchor_config(anchor)
+    wallet_path = workspace / ".solcoder" / "keys" / "default_wallet.json"
+    wallet_path.parent.mkdir(parents=True, exist_ok=True)
+    wallet_path.write_text("[]")
+
+    deploy.ensure_provider_wallet(anchor, cfg, wallet_path=wallet_path, cluster="devnet")
+    updated = deploy.load_anchor_config(anchor)
+    assert updated["provider"]["wallet"] == str(wallet_path)
+    assert updated["provider"]["cluster"] == "devnet"
+
+
+def test_ensure_provider_wallet_preserves_existing(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    anchor = workspace / "Anchor.toml"
+    anchor.write_text(
+        "[programs.devnet]\n"
+        "demo = \"replace-me\"\n\n"
+        "[provider]\n"
+        "cluster = \"devnet\"\n"
+        "wallet = \"/custom/wallet.json\"\n"
+    )
+    cfg = deploy.load_anchor_config(anchor)
+    wallet_path = workspace / ".solcoder" / "keys" / "default_wallet.json"
+    wallet_path.parent.mkdir(parents=True, exist_ok=True)
+    wallet_path.write_text("[]")
+
+    deploy.ensure_provider_wallet(anchor, cfg, wallet_path=wallet_path, cluster="devnet")
+    updated = deploy.load_anchor_config(anchor)
+    assert updated["provider"]["wallet"] == "/custom/wallet.json"
+    assert updated["provider"]["cluster"] == "devnet"
+
+
 def test_verify_workspace_reports_missing_anchor(monkeypatch, tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
 

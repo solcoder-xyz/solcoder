@@ -1,7 +1,0 @@
-[workspace]
-members = [
-    "programs/nft",
-]
-
-[profile.release]
-overflow-checks = true

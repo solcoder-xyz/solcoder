@@ -213,6 +213,35 @@ def update_anchor_mapping(
         save_anchor_config(anchor_path, anchor_config)
 
 
+def ensure_provider_wallet(
+    anchor_path: Path,
+    anchor_config: dict[str, Any],
+    *,
+    wallet_path: Path,
+    cluster: str | None = None,
+) -> None:
+    """Ensure the Anchor provider block has wallet/cluster fields populated."""
+    provider = anchor_config.setdefault("provider", {})
+    if not isinstance(provider, dict):
+        anchor_config["provider"] = {}
+        provider = anchor_config["provider"]
+
+    updated = False
+    if cluster:
+        cluster_value = str(cluster).strip()
+        if cluster_value and provider.get("cluster") != cluster_value:
+            provider["cluster"] = cluster_value
+            updated = True
+
+    wallet_str = str(wallet_path.expanduser())
+    current_wallet = provider.get("wallet")
+    if wallet_str and (not isinstance(current_wallet, str) or not current_wallet.strip()):
+        provider["wallet"] = wallet_str
+        updated = True
+
+    if updated:
+        save_anchor_config(anchor_path, anchor_config)
+
 def run_anchor_command(
     command: Sequence[str],
     *,
