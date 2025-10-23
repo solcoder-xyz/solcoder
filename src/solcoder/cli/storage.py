@@ -87,8 +87,14 @@ async function main() {
   if (!file) throw new Error('Missing --file <asset>');
   if (!keyPath) throw new Error('Set SOLANA_KEYPAIR to your keypair JSON path');
   const secret = Uint8Array.from(JSON.parse(fs.readFileSync(keyPath, 'utf8')));
-  // Irys supports 'solana' network with devnet/testnet/mainnet
-  const irys = await Irys.create({ url: 'https://devnet.irys.xyz', token: 'solana', key: secret, config: { providerUrl: rpc } });
+  const irys = new Irys({
+    url: 'https://devnet.irys.xyz',
+    network: 'devnet',
+    token: 'solana',
+    key: secret,
+    config: { providerUrl: rpc },
+  });
+  await irys.ready();
   const data = fs.readFileSync(path.resolve(file));
   const price = await irys.getPrice(data.length);
   const balance = await irys.getLoadedBalance();

@@ -11,14 +11,15 @@ import os
 import subprocess
 from typing import TYPE_CHECKING
 
-from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
-from solcoder.core import RenderOptions, TemplateError, available_templates, render_template
 from solcoder.cli.blueprints import (
     load_registry,
     load_wizard_schema,
     prompt_wizard,
     resolve_registry_template_path,
 )
+from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
+from solcoder.core import RenderOptions, TemplateError, available_templates, render_template
+from solcoder.solana.constants import TOKEN_2022_PROGRAM_ID
 import json
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -26,6 +27,8 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 KNOWN_KEYS = {"counter", "token", "nft", "registry", "escrow"}
+
+TOKEN_2022_PROGRAM_ARGS = ["--program-id", TOKEN_2022_PROGRAM_ID]
 
 
 def _prompt_or_default(app: CLIApp, prompt: str, default: str) -> str:
@@ -273,8 +276,8 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     meta_royalty = app._prompt_text("Seller fee bps (optional)").strip()
                     meta_creators = app._prompt_text("Creators 'PK:BPS,...' (optional)").strip()
                     meta_collection = app._prompt_text("Collection address (optional)").strip()
-                    meta_run_answer = app._prompt_text("Install deps and write on-chain now? (y/N)").strip().lower()
-                    meta_run = meta_run_answer in {"y", "yes"}
+                    meta_run_answer = app._prompt_text("Write metadata on-chain now? (Y/n)").strip().lower()
+                    meta_run = meta_run_answer not in {"n", "no"}
                     return _spl_token_quick_flow(
                         app,
                         decimals_input=decimals_value,
@@ -616,12 +619,17 @@ def _spl_token_quick_flow(
             str(key_path),
             "--mint-authority",
             status.public_key,
-            "--program-2022",
-            "--output",
-            "json",
-            "--url",
-            rpc_url,
+            "--enable-metadata",
         ]
+        create_token_cmd.extend(TOKEN_2022_PROGRAM_ARGS)
+        create_token_cmd.extend(
+            [
+                "--output",
+                "json",
+                "--url",
+                rpc_url,
+            ]
+        )
         with app.console.status("Creating token mint (Token-2022)…", spinner="dots"):
             create_result = _run_cmd(create_token_cmd)
         if create_result.returncode != 0:
@@ -642,12 +650,16 @@ def _spl_token_quick_flow(
             status.public_key,
             "--fee-payer",
             str(key_path),
-            "--program-2022",
-            "--output",
-            "json",
-            "--url",
-            rpc_url,
         ]
+        create_account_cmd.extend(TOKEN_2022_PROGRAM_ARGS)
+        create_account_cmd.extend(
+            [
+                "--output",
+                "json",
+                "--url",
+                rpc_url,
+            ]
+        )
         with app.console.status("Creating associated token account…", spinner="dots"):
             account_result = _run_cmd(create_account_cmd)
         if account_result.returncode != 0:
@@ -665,10 +677,14 @@ def _spl_token_quick_flow(
                 mint_address,
                 "--owner",
                 status.public_key,
-                "--program-2022",
-                "--url",
-                rpc_url,
             ]
+            addr_cmd.extend(TOKEN_2022_PROGRAM_ARGS)
+            addr_cmd.extend(
+                [
+                    "--url",
+                    rpc_url,
+                ]
+            )
             addr_result = _run_cmd(addr_cmd)
             if addr_result.returncode == 0:
                 meta = _extract_from_json(addr_result.stdout)
@@ -706,7 +722,11 @@ def _spl_token_quick_flow(
                 f"Mint (created): {mint_address}",
                 f"Explorer: {explorer}",
                 "You can fetch the ATA and retry mint manually:",
-                f"  spl-token address --verbose --token {mint_address} --owner {status.public_key} --program-2022 -u {rpc_url}",
+                (
+                    "  spl-token address --verbose "
+                    f"--token {mint_address} --owner {status.public_key} "
+                    f"--program-id {TOKEN_2022_PROGRAM_ID} -u {rpc_url}"
+                ),
             ]
             return CommandResponse(messages=[("system", "\n".join(hint_lines))])
 
@@ -723,12 +743,16 @@ def _spl_token_quick_flow(
                 str(key_path),
                 "--fee-payer",
                 str(key_path),
-                "--program-2022",
-                "--output",
-                "json",
-                "--url",
-                rpc_url,
             ]
+            mint_cmd.extend(TOKEN_2022_PROGRAM_ARGS)
+            mint_cmd.extend(
+                [
+                    "--output",
+                    "json",
+                    "--url",
+                    rpc_url,
+                ]
+            )
             mint_cmd.append(account_address)
             with app.console.status("Minting initial supply…", spinner="dots"):
                 mint_result = _run_cmd(mint_cmd)

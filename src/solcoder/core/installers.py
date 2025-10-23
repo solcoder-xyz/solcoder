@@ -7,11 +7,17 @@ import subprocess
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from typing_extensions import TypeAlias
 
 from solcoder.core.env_diag import DiagnosticResult, collect_environment_diagnostics
+import tomli_w
+
+try:  # Python 3.11+
+    import tomllib  # type: ignore[attr-defined]
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib  # type: ignore[no-redef]
 
 Runner: TypeAlias = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
@@ -151,19 +157,6 @@ INSTALLER_SPECS: dict[str, InstallerSpec] = {
         verification_targets=("SPL Token CLI",),
         required=False,
     ),
-    "cargo-build-sbf": InstallerSpec(
-        key="cargo-build-sbf",
-        display_name="Cargo build-sbf plugin",
-        command_map={
-            "macos": (
-                "cargo install --git https://github.com/solana-labs/cargo-build-sbf cargo-build-sbf --locked --config net.git-fetch-with-cli=true",
-            ),
-            "linux": (
-                "cargo install --git https://github.com/solana-labs/cargo-build-sbf cargo-build-sbf --locked --config net.git-fetch-with-cli=true",
-            ),
-        },
-        verification_targets=("Cargo build-sbf",),
-    ),
     "metadata-runner": InstallerSpec(
         key="metadata-runner",
         display_name="Metadata Runner (Umi) deps",
@@ -173,6 +166,16 @@ INSTALLER_SPECS: dict[str, InstallerSpec] = {
         },
         # Use Node.js as a proxy verification (ensures node/npm available). Project-local deps are not globally verifiable.
         verification_targets=("Node.js",),
+        required=False,
+    ),
+    "bundlr-runner": InstallerSpec(
+        key="bundlr-runner",
+        display_name="Bundlr uploader (Irys) deps",
+        command_map={
+            "macos": ("npm install",),
+            "linux": ("npm install",),
+        },
+        verification_targets=("Bundlr uploader (Irys)",),
         required=False,
     ),
 }
@@ -236,6 +239,8 @@ def install_tool(
         raise InstallerError(
             f"Installer '{tool}' is not supported on platform '{platform_key}'."
         )
+
+    _prepare_install_environment(spec, commands)
 
     executed_commands: list[str] = []
     logs: list[str] = []
@@ -327,6 +332,43 @@ def _run_command(
     finally:
         return_code = process.wait()
     return return_code, output_lines
+
+
+def _prepare_install_environment(spec: InstallerSpec, commands: Sequence[str]) -> None:
+    """Ensure any prerequisite configuration is in place prior to running installer commands."""
+    if any("cargo install" in cmd for cmd in commands):
+        _ensure_cargo_git_cli_config()
+
+
+def _ensure_cargo_git_cli_config() -> None:
+    """Ensure Cargo is configured to use the git CLI fallback for fetching repositories."""
+    cargo_dir = Path.home() / ".cargo"
+    try:
+        cargo_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+
+    config_path = cargo_dir / "config.toml"
+    data: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            data = tomllib.loads(config_path.read_text())
+        except Exception:
+            # Do not clobber user config if it's invalid; fall back to environment flag only.
+            return
+
+    net_section = data.get("net")
+    if not isinstance(net_section, dict):
+        net_section = {}
+    if net_section.get("git-fetch-with-cli") is True:
+        return
+
+    net_section["git-fetch-with-cli"] = True
+    data["net"] = net_section
+    try:
+        config_path.write_text(tomli_w.dumps(data))
+    except Exception:
+        pass
 
 
 def _refresh_environment(spec: InstallerSpec) -> None:

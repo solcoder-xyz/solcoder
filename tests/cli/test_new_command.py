@@ -8,6 +8,7 @@ from rich.console import Console
 from solcoder.cli.app import CLIApp
 from solcoder.session.manager import SessionManager
 from solcoder.solana.wallet import WalletManager, WalletStatus
+from solcoder.solana.constants import TOKEN_2022_PROGRAM_ID
 
 
 def _make_app(tmp_path: Path) -> CLIApp:
@@ -97,6 +98,7 @@ def test_new_token_quick_flow(monkeypatch, tmp_path: Path) -> None:
         "Token type": "quick",
         "Decimals": "6",
         "Initial supply": "123.45",
+        "Write metadata on-chain now? (Y/n)": "y",
         "Confirm": "mint",
     }
 
@@ -119,6 +121,20 @@ def test_new_token_quick_flow(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(app.wallet_manager, "export_wallet", lambda passphrase: "[1,2,3]")
     monkeypatch.setattr("solcoder.cli.commands.new.shutil.which", lambda _: "/usr/bin/spl-token")
 
+    import solcoder.cli.commands.metadata as metadata_cmd
+
+    monkeypatch.setattr(metadata_cmd, "_is_token2022_mint", lambda mint, rpc: True)
+
+    monkeypatch.setattr(
+        metadata_cmd,
+        "_write_metadata_via_spl_token",
+        lambda *args, **kwargs: (
+            True,
+            ["Token-2022 metadata initialized on-chain via spl-token."],
+            "https://arweave.net/token",
+        ),
+    )
+
     commands: list[list[str]] = []
 
     def _fake_run(cmd, *, capture_output, text, check):
@@ -139,9 +155,9 @@ def test_new_token_quick_flow(monkeypatch, tmp_path: Path) -> None:
 
     assert [cmd[1] for cmd in commands] == ["create-token", "create-account", "mint"]
     assert "--decimals" in commands[0] and "6" in commands[0]
-    assert "--program-2022" in commands[0]
-    assert "--program-2022" in commands[1]
-    assert "--program-2022" in commands[2]
+    for cmd in commands[:3]:
+        assert "--program-id" in cmd
+        assert TOKEN_2022_PROGRAM_ID in cmd
     assert commands[2][-1] == ata_address
 
     combined = "\n".join(message for _, message in response.messages)

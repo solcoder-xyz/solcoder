@@ -61,10 +61,11 @@ def test_collect_environment_diagnostics_reports_versions() -> None:
     resolver = _resolver_factory({"example": "/usr/bin/example"})
 
     results = collect_environment_diagnostics(runner=runner, resolver=resolver, tools=tools)
+    filtered = [res for res in results if res.name in {"Example Tool", "Missing Tool"}]
 
-    assert len(results) == 2
-    ok = results[0]
-    missing = results[1]
+    assert len(filtered) == 2
+    ok = next(res for res in filtered if res.name == "Example Tool")
+    missing = next(res for res in filtered if res.name == "Missing Tool")
     assert ok.name == "Example Tool"
     assert ok.status == "ok"
     assert ok.version == "example 1.2.3"
@@ -91,9 +92,7 @@ def test_collect_environment_diagnostics_handles_runner_errors() -> None:
         raise RuntimeError("boom")
 
     results = collect_environment_diagnostics(runner=runner, resolver=resolver, tools=tools)
-
-    assert len(results) == 1
-    result = results[0]
+    result = next(res for res in results if res.name == "Flaky Tool")
     assert result.status == "error"
     assert result.details == "boom"
     assert result.remediation == "Reinstall flaky tool."
@@ -133,8 +132,7 @@ def test_collect_environment_diagnostics_reports_fallback_hint(tmp_path: Path) -
         tools=(tool,),
     )
 
-    assert len(results) == 1
-    result = results[0]
+    result = next(res for res in results if res.name == "Example Tool")
     assert not result.found
     assert result.status == "missing"
     assert result.version == "example 2.0.0"

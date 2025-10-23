@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from rich.console import Console
 
 from solcoder.cli.app import CLIApp
+import solcoder.cli.commands.metadata as md
 from solcoder.session.manager import SessionManager
 from solcoder.solana.wallet import WalletManager, WalletStatus
 import solcoder.cli.storage as storage
@@ -86,9 +87,6 @@ def test_metadata_upload_bundlr(monkeypatch, tmp_path: Path) -> None:
     src.write_text("{\"name\":\"X\"}")
 
     # Mock bundlr upload
-    import solcoder.cli.commands.metadata as md
-    import solcoder.cli.storage as storage
-
     monkeypatch.setattr(md, "bundlr_upload", lambda *a, **k: "https://arweave.net/FAKE")
     # Mock wallet
     ws_status = WalletStatus(exists=True, public_key="PUBKEY11111111111111111111111111111111", is_unlocked=False, wallet_path=tmp_path / "k.json")
@@ -98,6 +96,83 @@ def test_metadata_upload_bundlr(monkeypatch, tmp_path: Path) -> None:
     resp = app.handle_line(f"/metadata upload --file {src} --storage bundlr")
     combined = "\n".join(m for _, m in resp.messages)
     assert "https://arweave.net/FAKE" in combined
+
+
+def test_metadata_set_run_invokes_runner(monkeypatch, tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+
+    # Prepare workspace
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "Anchor.toml").write_text("[workspace]\n")
+    app.session_context.metadata.active_project = str(ws)
+    app.session_manager.save(app.session_context)
+
+    # Capture runner invocation
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(md, "_is_token2022_mint", lambda mint, rpc: True)
+
+    def fake_spl(app_obj, mint, *, name, symbol, uri, rpc_url, metadata_path=None):
+        captured["mint"] = mint
+        captured["name"] = name
+        captured["symbol"] = symbol
+        captured["uri"] = uri
+        captured["rpc_url"] = rpc_url
+        if metadata_path:
+            metadata_path.write_text('{"mint":"x"}')
+        return True, ["Token-2022 metadata initialized on-chain via spl-token."], "https://arweave.net/token"
+
+    monkeypatch.setattr(md, "_write_metadata_via_spl_token", fake_spl)
+
+    mint = "Mint11111111111111111111111111111111111111111"
+    uri = "file:///tmp/meta.json"
+    resp = app.handle_line(f"/metadata set --mint {mint} --name Demo --symbol DMO --uri {uri} --run")
+
+    combined = "\n".join(m for _, m in resp.messages)
+    assert "Metadata set on-chain:" in combined
+    assert "Token-2022 metadata initialized on-chain via spl-token." in combined
+    assert "https://arweave.net/token" in combined
+    assert "To write on-chain now:" not in combined
+    assert captured["mint"] == mint
+    assert captured["uri"] == uri
+
+
+def test_metadata_set_run_falls_back_to_runner(monkeypatch, tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "Anchor.toml").write_text("[workspace]\n")
+    app.session_context.metadata.active_project = str(ws)
+    app.session_manager.save(app.session_context)
+
+    monkeypatch.setattr(md, "_is_token2022_mint", lambda mint, rpc: False)
+
+    def fake_spl(*args, **kwargs):
+        raise AssertionError("Token-2022 path should not execute when mint is legacy" )
+
+    monkeypatch.setattr(md, "_write_metadata_via_spl_token", fake_spl)
+
+    runner_called: dict[str, object] = {}
+
+    def fake_runner(app_obj, runner_dir, metadata_path, rpc_url):
+        runner_called["dir"] = runner_dir
+        runner_called["metadata_path"] = metadata_path
+        runner_called["rpc_url"] = rpc_url
+        return True, ["On-chain metadata write completed via Umi runner."]
+
+    monkeypatch.setattr(md, "_run_metadata_via_node", fake_runner)
+
+    mint = "Legacy111111111111111111111111111111111111111"
+    uri = "https://example.com/meta.json"
+    resp = app.handle_line(f"/metadata set --mint {mint} --name Legacy --symbol LGY --uri {uri} --run")
+
+    combined = "\n".join(m for _, m in resp.messages)
+    assert "Metadata set on-chain:" in combined
+    assert "On-chain metadata write completed via Umi runner." in combined
+    assert runner_called["dir"]
+    assert Path(runner_called["metadata_path"]).exists()
 
 
 def test_bundlr_upload_invokes_runner(monkeypatch, tmp_path: Path) -> None:

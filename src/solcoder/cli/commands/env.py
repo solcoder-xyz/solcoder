@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
@@ -99,19 +101,27 @@ def register(_app: CLIApp, router: CommandRouter) -> None:
         for tool_key in install_list:
             try:
                 runner = None
-                if tool_key == "metadata-runner":
-                    # Prepare a runner that executes within the project metadata runner directory
-                    from pathlib import Path as _Path
+                if tool_key in {"metadata-runner", "bundlr-runner"}:
+                    subdir = "metadata_runner" if tool_key == "metadata-runner" else "uploader_runner"
+
                     def _runner(cmd: list[str]):  # type: ignore[override]
-                        # Find active workspace
-                        active = getattr(app.session_context.metadata, "active_project", None)
-                        root = _Path(active).expanduser() if active else _Path.cwd()
-                        target = (root / ".solcoder" / "metadata_runner")
+                        from solcoder.cli.commands.metadata import _workspace_root as _metadata_workspace_root
+
+                        root = _metadata_workspace_root(app)
+                        if tool_key == "bundlr-runner":
+                            from solcoder.cli.storage import ensure_bundlr_runner
+
+                            ensure_bundlr_runner(root)
+                        target = root / ".solcoder" / subdir
                         if not target.exists():
-                            # No runner scaffold yet
-                            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=str(target) + " missing; run /metadata set first")
-                        full = [cmd[0], cmd[1], f"cd {str(target)} && {cmd[2]}"] if cmd[:2] == ["bash", "-lc"] else cmd
-                        return subprocess.run(full, capture_output=True, text=True, check=False)
+                            hint = "`/metadata set --run`" if tool_key == "bundlr-runner" else "`/metadata set`"
+                            message = f"{target} missing; run {hint} first."
+                            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr=message)
+                        if cmd[:2] == ["bash", "-lc"] and len(cmd) >= 3:
+                            command = [cmd[0], cmd[1], f"cd {target} && {cmd[2]}"]
+                            return subprocess.run(command, capture_output=True, text=True, check=False)
+                        return subprocess.run(cmd, cwd=str(target), capture_output=True, text=True, check=False)
+
                     runner = _runner
                 result = install_tool(tool_key, console=app.console, dry_run=dry_run, runner=runner)
             except InstallerError as exc:

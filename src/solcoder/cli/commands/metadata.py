@@ -10,7 +10,10 @@ Implements a minimal local-first pipeline:
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
 from solcoder.cli.storage import bundlr_upload, ipfs_upload_nft_storage, ipfs_upload_dir_web3storage
+from solcoder.solana.constants import TOKEN_2022_PROGRAM_ID
 
 if TYPE_CHECKING:  # pragma: no cover
     from solcoder.cli.app import CLIApp
@@ -57,6 +61,9 @@ def _metadata_dir(app: "CLIApp") -> Path:
     out = root / ".solcoder" / "metadata"
     out.mkdir(parents=True, exist_ok=True)
     return out
+
+
+TOKEN_2022_PROGRAM_ARGS = ["--program-id", TOKEN_2022_PROGRAM_ID]
 
 
 def _write_runner(app: "CLIApp") -> Path:
@@ -173,6 +180,265 @@ main().catch((e) => { console.error(e); process.exit(1); });
 """
     (runner_dir / "src" / "metadata_set.ts").write_text(ts_src)
     return runner_dir
+
+
+def _is_token2022_mint(mint: str, rpc_url: str) -> bool:
+    if shutil.which("spl-token") is None:
+        return False
+    cmd = [
+        "spl-token",
+        "display",
+        mint,
+        "--output",
+        "json",
+    ]
+    cmd.extend(TOKEN_2022_PROGRAM_ARGS)
+    cmd.extend(["--url", rpc_url])
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return False
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except Exception:
+        return True
+    program_id = (
+        payload.get("programId")
+        or payload.get("program_id")
+        or payload.get("mint", {}).get("programId")
+    )
+    if program_id:
+        return str(program_id) == TOKEN_2022_PROGRAM_ID
+    return True
+
+
+def _write_metadata_via_spl_token(
+    app: "CLIApp",
+    mint: str,
+    *,
+    name: str,
+    symbol: str,
+    uri: str,
+    rpc_url: str,
+    metadata_path: Path | None = None,
+) -> tuple[bool, list[str], str]:
+    if shutil.which("spl-token") is None:
+        return False, ["(warning) spl-token CLI not found; install Solana CLI and rerun '/metadata set --run'."], uri
+
+    manager = app.wallet_manager
+    try:
+        status = manager.status()
+    except Exception as exc:  # noqa: BLE001
+        return False, [f"(error) Unable to read wallet status: {exc}"], uri
+
+    if not getattr(status, "exists", False) or not getattr(status, "public_key", None):
+        return False, ["(error) No wallet available; cannot write metadata on-chain."], uri
+
+    try:
+        passphrase = app._prompt_secret("Wallet passphrase", allow_master=False)
+        secret = manager.export_wallet(passphrase)
+    except Exception as exc:  # noqa: BLE001
+        return False, [f"(error) Wallet export failed: {exc}"], uri
+
+    key_json: Path | None = None
+    messages: list[str] = []
+    resolved_uri = uri
+    try:
+        if uri.startswith("file://"):
+            local_path = Path(uri[7:])
+            try:
+                remote_uri = bundlr_upload(
+                    local_path,
+                    rpc_url=rpc_url,
+                    key_json=secret,
+                    console=getattr(app, "console", None),
+                    workspace_root=_workspace_root(app),
+                    content_type="application/json",
+                )
+                resolved_uri = remote_uri
+                messages.append(f"Metadata uploaded via Bundlr: {remote_uri}")
+                if metadata_path and metadata_path.exists():
+                    try:
+                        data = json.loads(metadata_path.read_text())
+                        data["uri"] = remote_uri
+                        metadata_path.write_text(json.dumps(data, indent=2))
+                    except Exception as exc:  # noqa: BLE001
+                        messages.append(f"(warning) Unable to rewrite metadata file with remote URI: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                messages.append(f"(warning) Bundlr upload failed: {exc}")
+
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as handle:
+            handle.write(secret)
+            handle.flush()
+            key_json = Path(handle.name)
+        try:
+            os.chmod(key_json, 0o600)
+        except PermissionError:
+            pass
+
+        init_cmd = [
+            "spl-token",
+            "initialize-metadata",
+            mint,
+            name,
+            symbol,
+            resolved_uri,
+            "--mint-authority",
+            str(key_json),
+            "--fee-payer",
+            str(key_json),
+        ]
+        if status.public_key:
+            init_cmd.extend(["--update-authority", str(status.public_key)])
+        init_cmd.extend(TOKEN_2022_PROGRAM_ARGS)
+        init_cmd.extend(["--url", rpc_url])
+        init_res = subprocess.run(init_cmd, capture_output=True, text=True, check=False)
+        if init_res.returncode == 0:
+            messages.append("Token-2022 metadata initialized on-chain via spl-token.")
+            return True, messages, resolved_uri
+
+        err = init_res.stderr.strip() or init_res.stdout.strip()
+        err_lower = err.lower()
+        already_exists = any(token in err_lower for token in ["already", "0x0a", "custom program error: 0xa"])
+        if not already_exists:
+            messages.append(f"(warning) spl-token initialize-metadata failed: {err or 'unknown error'}")
+            return False, messages, resolved_uri
+
+        update_fields = [("name", name), ("symbol", symbol), ("uri", resolved_uri)]
+        for field, value in update_fields:
+            upd_cmd = [
+                "spl-token",
+                "update-metadata",
+                mint,
+                field,
+                value,
+                "--authority",
+                str(key_json),
+                "--fee-payer",
+                str(key_json),
+            ]
+            upd_cmd.extend(TOKEN_2022_PROGRAM_ARGS)
+            upd_cmd.extend(["--url", rpc_url])
+            upd_res = subprocess.run(upd_cmd, capture_output=True, text=True, check=False)
+            if upd_res.returncode != 0:
+                upd_err = upd_res.stderr.strip() or upd_res.stdout.strip() or "unknown error"
+                messages.append(f"(warning) Failed to update metadata field '{field}': {upd_err}")
+                return False, messages, resolved_uri
+        messages.append("Token-2022 metadata updated on-chain via spl-token.")
+        return True, messages, resolved_uri
+    finally:
+        try:
+            if key_json:
+                key_json.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _run_metadata_via_node(app: "CLIApp", runner_dir: Path, metadata_path: Path, rpc_url: str) -> tuple[bool, list[str]]:
+    """Install runner deps if needed and execute the Umi script to write metadata."""
+
+    messages: list[str] = []
+    manager = app.wallet_manager
+    try:
+        status = manager.status()
+    except Exception as exc:  # noqa: BLE001
+        return False, [f"(error) Unable to read wallet status: {exc}"]
+
+    if not getattr(status, "exists", False):
+        return False, ["(error) No wallet available; cannot write metadata on-chain."]
+
+    try:
+        passphrase = app._prompt_secret("Wallet passphrase", allow_master=False)
+        secret = manager.export_wallet(passphrase)
+    except Exception as exc:  # noqa: BLE001
+        return False, [f"(error) Wallet export failed: {exc}"]
+
+    key_json: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as handle:
+            handle.write(secret)
+            handle.flush()
+            key_json = Path(handle.name)
+        try:
+            os.chmod(key_json, 0o600)
+        except PermissionError:
+            pass
+
+        npm_path = shutil.which("npm")
+        if not npm_path:
+            return False, ["(warning) 'npm' not found; install Node.js and rerun '/metadata set --run'."]
+
+        env = os.environ.copy()
+        env["SOLANA_KEYPAIR"] = str(key_json)
+
+        node_modules = runner_dir / "node_modules"
+        if not node_modules.exists():
+            install_cmd = [npm_path, "install"]
+            try:
+                install_res = subprocess.run(
+                    install_cmd,
+                    cwd=str(runner_dir),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except FileNotFoundError:
+                return False, ["(warning) 'npm' not found; install Node.js and rerun '/metadata set --run'."]
+
+            if install_res.returncode != 0:
+                err = install_res.stderr.strip() or install_res.stdout.strip() or "npm install failed"
+                return False, [f"(warning) npm install failed: {err}"]
+
+        npx_path = shutil.which("npx")
+        if npx_path:
+            runner_cmd = [
+                npx_path,
+                "ts-node",
+                "src/metadata_set.ts",
+                "--file",
+                str(metadata_path),
+                "--rpc",
+                str(rpc_url),
+            ]
+        else:
+            runner_cmd = [
+                npm_path,
+                "exec",
+                "ts-node",
+                "src/metadata_set.ts",
+                "--file",
+                str(metadata_path),
+                "--rpc",
+                str(rpc_url),
+            ]
+
+        try:
+            runner_res = subprocess.run(
+                runner_cmd,
+                cwd=str(runner_dir),
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+        except FileNotFoundError:
+            return False, ["(warning) 'npx' not found; install Node.js 18+ and rerun '/metadata set --run'."]
+
+        if runner_res.returncode != 0:
+            err = runner_res.stderr.strip() or runner_res.stdout.strip() or "metadata runner failed"
+            return False, [f"(warning) Metadata runner failed: {err}"]
+
+        output = runner_res.stdout.strip()
+        if output:
+            messages.append(f"On-chain metadata write completed via Umi runner. Output: {output}")
+        else:
+            messages.append("On-chain metadata write completed via Umi runner.")
+        return True, messages
+    finally:
+        try:
+            if key_json:
+                key_json.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def register(app: CLIApp, router: CommandRouter) -> None:
@@ -306,7 +572,8 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             royalty_bps = app._prompt_text("Seller fee bps (optional)").strip()
             creators = app._prompt_text("Creators 'PK:BPS,...' (optional)").strip()
             collection = app._prompt_text("Collection address (optional)").strip()
-            do_run = app._prompt_text("Install deps and write on-chain now? (y/N)").strip().lower() in {"y","yes"}
+            do_run_answer = app._prompt_text("Write metadata on-chain now? (Y/n)").strip().lower()
+            do_run = do_run_answer not in {"n", "no"}
             # Dispatch to set
             import shlex as _shlex
             cmd_parts = [
@@ -395,6 +662,7 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 collection=collection,
             )
             # Present summary and persist local metadata JSON (future on-chain write)
+            run_success = False
             lines = [
                 "Metadata set (staged):",
                 f"  Mint      : {args_obj.mint}",
@@ -435,78 +703,67 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 }
                 out_path.write_text(json.dumps(payload, indent=2))
                 lines.append(f"Saved: {out_path}")
-                # Prepare a Node runner to write metadata on-chain via Umi (optional)
-                runner_dir = _write_runner(app)
-                lines.append("Runner prepared: Node Umi script scaffolded.")
-                lines.append(f"Runner dir: {runner_dir}")
                 rpc = getattr(getattr(app.config_context, "config", None), "rpc_url", "https://api.devnet.solana.com")
+                rpc_str = str(rpc)
+                run_success = False
+                runner_dir: Path | None = None
+                run_messages: list[str] = []
+
                 if run_now:
-                    # Attempt to run the script immediately if deps are present
-                    import os
-                    import subprocess
-                    import tempfile
-                    manager = app.wallet_manager
-                    status = manager.status()
-                    if not status.exists:
-                        lines.append("(error) No wallet available; cannot run on-chain write.")
-                    else:
-                        key_json: Path | None = None
+                    if _is_token2022_mint(args_obj.mint, rpc_str):
+                        run_success, run_messages, resolved_uri = _write_metadata_via_spl_token(
+                            app,
+                            args_obj.mint,
+                            name=args_obj.name,
+                            symbol=args_obj.symbol,
+                            uri=args_obj.uri,
+                            rpc_url=rpc_str,
+                            metadata_path=out_path,
+                        )
+                        lines.extend(run_messages)
+                        if run_success and resolved_uri != args_obj.uri:
+                            args_obj.uri = resolved_uri
+                    if not run_success:
                         try:
-                            # Ensure dependencies
-                            if not (runner_dir / "node_modules").exists():
-                                # Try to install automatically
-                                try:
-                                    result = subprocess.run(["npm", "install"], cwd=str(runner_dir), capture_output=True, text=True, check=False)
-                                    if result.returncode != 0:
-                                        lines.append("(warning) npm install failed; run manually and retry --run.")
-                                except FileNotFoundError:
-                                    lines.append("(warning) 'npm' not found; install Node.js and run 'npm install' in the runner dir.")
-                            if (runner_dir / "node_modules").exists():
-                                # Export wallet key (prompt for passphrase)
-                                passphrase = app._prompt_secret("Wallet passphrase", allow_master=False)
-                                secret = manager.export_wallet(passphrase)
-                                with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as f:
-                                    f.write(secret)
-                                    f.flush()
-                                    key_json = Path(f.name)
-                                try:
-                                    os.chmod(key_json, 0o600)
-                                except Exception:
-                                    pass
-                                env = os.environ.copy()
-                                env["SOLANA_KEYPAIR"] = str(key_json)
-                                cmd = [
-                                    "npx",
-                                    "ts-node",
-                                    "src/metadata_set.ts",
-                                    "--file",
-                                    str(out_path),
-                                    "--rpc",
-                                    str(rpc),
-                                ]
-                                try:
-                                    result = subprocess.run(cmd, cwd=str(runner_dir), capture_output=True, text=True, check=False)
-                                    if result.returncode == 0:
-                                        lines.append("On-chain write completed via Umi runner.")
-                                    else:
-                                        err = result.stderr.strip() or result.stdout.strip() or "runner failed"
-                                        lines.append(f"(warning) Runner error: {err}")
-                                except FileNotFoundError:
-                                    lines.append("(warning) 'npx' not found; install Node.js and run manually.")
-                        finally:
-                            try:
-                                if key_json:
-                                    key_json.unlink(missing_ok=True)
-                            except Exception:
-                                pass
+                            runner_dir = _write_runner(app)
+                            lines.append("Runner prepared: Node Umi script scaffolded.")
+                            lines.append(f"Runner dir: {runner_dir}")
+                        except Exception as runner_exc:  # noqa: BLE001
+                            lines.append(f"(warning) Failed to scaffold metadata runner: {runner_exc}")
+                            runner_dir = None
+                        if runner_dir is not None:
+                            success, node_messages = _run_metadata_via_node(app, runner_dir, out_path, rpc_str)
+                            lines.extend(node_messages)
+                            run_success = success
                 else:
-                    lines.append("To write on-chain now:")
-                    lines.append("  cd " + str(runner_dir))
-                    lines.append("  npm install")
-                    lines.append(f"  SOLANA_KEYPAIR=/path/to/your/key.json npm run set -- --file ../metadata/{args_obj.mint}.json --rpc {rpc}")
+                    try:
+                        runner_dir = _write_runner(app)
+                        lines.append("Runner prepared: Node Umi script scaffolded.")
+                        lines.append(f"Runner dir: {runner_dir}")
+                    except Exception as runner_exc:  # noqa: BLE001
+                        lines.append(f"(warning) Failed to scaffold metadata runner: {runner_exc}")
+                        runner_dir = None
+
+                if not run_success:
+                    if runner_dir is not None:
+                        lines.append("To write on-chain now:")
+                        lines.append("  cd " + str(runner_dir))
+                        lines.append("  npm install")
+                        lines.append(
+                            "  SOLANA_KEYPAIR=/path/to/your/key.json npm run set -- --file "
+                            f"../metadata/{args_obj.mint}.json --rpc {rpc_str}"
+                        )
+                    elif run_now:
+                        lines.append("Runner setup failed; rerun '/metadata set --run' after resolving the issue.")
             except Exception as exc:  # noqa: BLE001
                 lines.append(f"(warning) Failed to persist local metadata: {exc}")
-            lines.append("Note: On-chain write via Metaplex is planned in 2.3b.")
+            else:
+                if run_success:
+                    lines[0] = "Metadata set on-chain:"
+                    for idx, line in enumerate(lines):
+                        if line.startswith("  URI"):
+                            lines[idx] = f"  URI       : {args_obj.uri}"
+                            break
             return CommandResponse(messages=[("system", "\n".join(lines))])
 
         return CommandResponse(messages=[("system", "Unknown subcommand. Try '/metadata help'.")])
