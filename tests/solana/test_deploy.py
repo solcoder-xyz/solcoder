@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from pathlib import Path
+
+import solcoder.solana.deploy as deploy
+
+
+def _make_workspace(tmp_path: Path, program_name: str = "demo") -> Path:
+    workspace = tmp_path / "workspace"
+    (workspace / "programs" / program_name / "src").mkdir(parents=True)
+    (workspace / "programs" / program_name / "src" / "lib.rs").write_text(
+        'use anchor_lang::prelude::*;\n\ndeclare_id!("replace-me");\n'
+    )
+    (workspace / "Anchor.toml").write_text(
+        "[programs.devnet]\n"
+        f"{program_name} = \"replace-me\"\n\n"
+        "[provider]\n"
+        "cluster = \"devnet\"\n"
+    )
+    return workspace
+
+
+def test_ensure_program_keypair_updates_declare_id(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    program_root = workspace / "programs" / "demo"
+    anchor_path = workspace / "Anchor.toml"
+    cfg = deploy.load_anchor_config(anchor_path)
+
+    key_path, program_id = deploy.ensure_program_keypair(workspace, "demo")
+    assert key_path.exists()
+    assert len(program_id) >= 32
+
+    deploy.update_declare_id(program_root, program_id)
+    content = (program_root / "src" / "lib.rs").read_text()
+    assert program_id in content
+
+    deploy.update_anchor_mapping(anchor_path, cfg, program_name="demo", program_id=program_id, cluster="devnet")
+    cfg_after = deploy.load_anchor_config(anchor_path)
+    assert cfg_after["programs"]["devnet"]["demo"] == program_id
+
+
+def test_run_anchor_deploy_parses_program_id(monkeypatch, tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    keypair = workspace / "demo.json"
+    keypair.write_text("[]")
+
+    def fake_run(cmd, cwd, capture_output, text, env, timeout, check):  # noqa: ARG001
+        assert cmd[:2] == ["anchor", "deploy"]
+        return SimpleNamespace(returncode=0, stdout="Program Id: Demo111111111111111111111111111111111111111", stderr="")
+
+    monkeypatch.setattr(deploy.subprocess, "run", fake_run)
+    result = deploy.run_anchor_deploy(project_root=workspace, program_name="demo", program_keypair=keypair)
+    assert result.success
+    assert result.program_id == "Demo111111111111111111111111111111111111111"
+
+
+def test_verify_workspace_reports_missing_anchor(monkeypatch, tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+
+    def fake_which(binary: str) -> str | None:
+        if binary == "anchor":
+            return None
+        return f"/usr/bin/{binary}"
+
+    monkeypatch.setattr(deploy.shutil, "which", fake_which)
+    report = deploy.verify_workspace(
+        project_root=workspace,
+        program_name="demo",
+        cluster="devnet",
+        wallet_exists=True,
+        wallet_unlocked=True,
+    )
+    assert not report.ok
+    assert any("anchor CLI" in error for error in report.errors)

@@ -36,7 +36,7 @@ REQUIRED_TOOLS: tuple[ToolRequirement, ...] = (
     ToolRequirement(
         name="Solana CLI",
         executable="solana",
-        version_args=["--version"],
+        version_args=["--help"],
         remediation="Install the Solana CLI: https://docs.solana.com/cli/install-solana-cli",
         fallback_paths=(
             "~/.local/share/solana/install/active_release/bin/solana",
@@ -67,6 +67,19 @@ REQUIRED_TOOLS: tuple[ToolRequirement, ...] = (
         remediation="Install Rust toolchain with rustup if Cargo is missing: https://rustup.rs/",
         fallback_paths=(
             "~/.cargo/bin/cargo",
+        ),
+    ),
+    ToolRequirement(
+        name="Cargo build-sbf",
+        executable="cargo-build-sbf",
+        version_args=["--help"],
+        remediation=(
+            "Install the Solana SBF toolchain plugin: "
+            "`cargo install --git https://github.com/solana-labs/cargo-build-sbf cargo-build-sbf --locked "
+            "--config net.git-fetch-with-cli=true` and ensure $HOME/.cargo/bin is on your PATH."
+        ),
+        fallback_paths=(
+            "~/.cargo/bin/cargo-build-sbf",
         ),
     ),
     ToolRequirement(

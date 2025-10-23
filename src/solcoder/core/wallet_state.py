@@ -4,8 +4,15 @@ from __future__ import annotations
 
 import logging
 
+from typing import TYPE_CHECKING, Any
+
 from solcoder.session import SessionMetadata
-from solcoder.solana import SolanaRPCClient, WalletStatus
+from solcoder.solana.rpc import SolanaRPCClient
+
+if TYPE_CHECKING:  # pragma: no cover
+    from solcoder.solana.wallet import WalletStatus  # noqa: F401
+else:
+    WalletStatus = Any  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 

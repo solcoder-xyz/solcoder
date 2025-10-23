@@ -151,6 +151,19 @@ INSTALLER_SPECS: dict[str, InstallerSpec] = {
         verification_targets=("SPL Token CLI",),
         required=False,
     ),
+    "cargo-build-sbf": InstallerSpec(
+        key="cargo-build-sbf",
+        display_name="Cargo build-sbf plugin",
+        command_map={
+            "macos": (
+                "cargo install --git https://github.com/solana-labs/cargo-build-sbf cargo-build-sbf --locked --config net.git-fetch-with-cli=true",
+            ),
+            "linux": (
+                "cargo install --git https://github.com/solana-labs/cargo-build-sbf cargo-build-sbf --locked --config net.git-fetch-with-cli=true",
+            ),
+        },
+        verification_targets=("Cargo build-sbf",),
+    ),
     "metadata-runner": InstallerSpec(
         key="metadata-runner",
         display_name="Metadata Runner (Umi) deps",

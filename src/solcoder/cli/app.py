@@ -706,21 +706,21 @@ class CLIApp:
         # Suggest installing project-local metadata runner deps if a runner is scaffolded
         try:
             active = getattr(self.session_context.metadata, "active_project", None)
-            root = Path(active).expanduser() if active else Path.cwd()
-            runner_dir = root / ".solcoder" / "metadata_runner"
-            pkg_json = runner_dir / "package.json"
-            node_modules = runner_dir / "node_modules"
-            if pkg_json.exists() and not node_modules.exists():
-                answer = prompt_text(
-                    self.session,
-                    "Install metadata runner (Umi) dependencies now? (y/N)",
-                ).strip().lower()
-                if answer in {"y", "yes"}:
-                    from solcoder.core.installers import install_tool, InstallerError
-                    try:
-                        install_tool("metadata-runner", console=self.console)
-                    except InstallerError as exc:
-                        self.console.print(f"[#F97316]Metadata runner install failed: {exc}[/]")
+            if active:
+                root = Path(active).expanduser()
+                runner_dir = root / ".solcoder" / "metadata_runner"
+                pkg_json = runner_dir / "package.json"
+                node_modules = runner_dir / "node_modules"
+                if pkg_json.exists() and not node_modules.exists():
+                    answer = prompt_text(
+                        self.session,
+                        "Install metadata runner (Umi) dependencies now? (y/N)",
+                    ).strip().lower()
+                    if answer in {"y", "yes"}:
+                        try:
+                            install_tool("metadata-runner", console=self.console)
+                        except InstallerError as exc:
+                            self.console.print(f"[#F97316]Metadata runner install failed: {exc}[/]")
         except Exception:
             pass
 

@@ -4,15 +4,19 @@ from solcoder.core.tools.base import Tool, Toolkit, ToolResult
 
 
 def _deploy_handler(payload: dict[str, str]) -> ToolResult:
-    environment = payload.get("environment", "devnet")
-    steps = [
-        "Run `anchor build` (or relevant build command).",
-        f"Deploy to {environment} environment.",
-        "Verify logs and post-deploy health checks.",
+    environment = payload.get("environment")
+    cmd = "/deploy"
+    if environment and environment.strip():
+        cmd = f"/deploy --cluster {environment.strip()}"
+    content = [
+        "Dispatching deploy command.",
+        f"Use `{cmd}` to build and deploy the active workspace.",
     ]
-    content = ["Deployment checklist:", ""]
-    content.extend(f"- {step}" for step in steps)
-    return ToolResult(content="\n".join(content), summary=f"Deployment checklist for {environment}")
+    return ToolResult(
+        content="\n".join(content),
+        summary=f"Deploy workspace ({environment or 'current cluster'})",
+        data={"dispatch_command": cmd, "suppress_preview": True},
+    )
 
 
 def deploy_toolkit() -> Toolkit:

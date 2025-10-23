@@ -818,6 +818,9 @@ def _spl_token_quick_flow(
     dispatch = " ".join(_shlex.quote(p) for p in md_cmd)
     try:
         routed = app.command_router.dispatch(app, dispatch[1:] if dispatch.startswith("/") else dispatch)
-        return routed
+        if routed.messages:
+            routed.messages.insert(0, ("system", "\n".join(lines)))
+            return routed
+        return CommandResponse(messages=[("system", "\n".join(lines))])
     except Exception:
         return CommandResponse(messages=[("system", "\n".join(lines))])
