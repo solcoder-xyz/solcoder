@@ -253,33 +253,28 @@ def _collect_runner_diagnostics(start: Path) -> List[DiagnosticResult]:
         ]
 
     diagnostics: List[DiagnosticResult] = []
+    missing_entries: list[tuple[Path, str, str | None]] = []
     for workspace in candidates:
         runner_dir = workspace / ".solcoder" / "uploader_runner"
         pkg_path = runner_dir / "package.json"
         module_dir = runner_dir / "node_modules" / "@irys" / "sdk"
 
         if not runner_dir.exists():
-            diagnostics.append(
-                DiagnosticResult(
-                    name=name,
-                    status="missing",
-                    found=False,
-                    version=None,
-                    remediation=remediation,
-                    details=f"{runner_dir} missing. Run `/metadata set --run` once or `/env install bundlr-runner`.",
+            missing_entries.append(
+                (
+                    workspace,
+                    f"{runner_dir} missing. Run `/metadata set --run` once or `/env install bundlr-runner`.",
+                    None,
                 )
             )
             continue
 
         if not pkg_path.exists():
-            diagnostics.append(
-                DiagnosticResult(
-                    name=name,
-                    status="missing",
-                    found=False,
-                    version=None,
-                    remediation=remediation,
-                    details="package.json missing. Re-run `/env install bundlr-runner`.",
+            missing_entries.append(
+                (
+                    workspace,
+                    "package.json missing. Re-run `/env install bundlr-runner`.",
+                    None,
                 )
             )
             continue
@@ -306,16 +301,33 @@ def _collect_runner_diagnostics(start: Path) -> List[DiagnosticResult]:
                 )
             ]
 
-        diagnostics.append(
+        missing_entries.append(
+            (
+                workspace,
+                f"Dependencies not installed (node_modules/@irys/sdk missing).",
+                version,
+            )
+        )
+
+    if missing_entries:
+        detail_lines = []
+        version: str | None = None
+        for workspace, message, detected_version in missing_entries:
+            prefix = f"{workspace}: "
+            detail_lines.append(prefix + message)
+            if detected_version and not version:
+                version = detected_version
+        combined = "\n".join(detail_lines)
+        return [
             DiagnosticResult(
                 name=name,
                 status="missing",
                 found=False,
                 version=version,
                 remediation=remediation,
-                details=f"Dependencies not installed for workspace {workspace} (node_modules/@irys/sdk missing).",
+                details=combined,
             )
-        )
+        ]
 
     return diagnostics or [
         DiagnosticResult(
