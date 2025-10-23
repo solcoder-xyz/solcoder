@@ -853,6 +853,18 @@ def _spl_token_quick_flow(
             "--type",
             "token",
         ]
+        if meta_name:
+            md_cmd += ["--default-name", meta_name]
+        if meta_symbol:
+            md_cmd += ["--default-symbol", meta_symbol]
+        if meta_uri:
+            md_cmd += ["--default-uri", meta_uri]
+        if meta_royalty_bps is not None and str(meta_royalty_bps).strip() != "":
+            md_cmd += ["--default-royalty-bps", str(meta_royalty_bps)]
+        if meta_creators:
+            md_cmd += ["--default-creators", meta_creators]
+        if meta_collection:
+            md_cmd += ["--default-collection", meta_collection]
     # Show success then dispatch metadata command
     dispatch = " ".join(_shlex.quote(p) for p in md_cmd)
     try:

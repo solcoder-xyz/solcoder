@@ -534,6 +534,12 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         if sub == "wizard":
             mint: str | None = None
             asset_type: str = "token"
+            default_name: str | None = None
+            default_symbol: str | None = None
+            default_uri: str | None = None
+            default_royalty_bps: str | None = None
+            default_creators: str | None = None
+            default_collection: str | None = None
             i = 1
             while i < len(args):
                 tok = args[i]
@@ -543,6 +549,30 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     continue
                 if tok == "--type" and i + 1 < len(args):
                     asset_type = args[i + 1]
+                    i += 2
+                    continue
+                if tok == "--default-name" and i + 1 < len(args):
+                    default_name = args[i + 1]
+                    i += 2
+                    continue
+                if tok == "--default-symbol" and i + 1 < len(args):
+                    default_symbol = args[i + 1]
+                    i += 2
+                    continue
+                if tok == "--default-uri" and i + 1 < len(args):
+                    default_uri = args[i + 1]
+                    i += 2
+                    continue
+                if tok == "--default-royalty-bps" and i + 1 < len(args):
+                    default_royalty_bps = args[i + 1]
+                    i += 2
+                    continue
+                if tok == "--default-creators" and i + 1 < len(args):
+                    default_creators = args[i + 1]
+                    i += 2
+                    continue
+                if tok == "--default-collection" and i + 1 < len(args):
+                    default_collection = args[i + 1]
                     i += 2
                     continue
                 i += 1
@@ -564,12 +594,21 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     defaults = json.loads(metadata_file.read_text())
                 except Exception:
                     defaults = {}
-            name_default = (defaults.get("name") or "Untitled").strip()
-            symbol_default = (defaults.get("symbol") or "TKN").strip()
-            uri_default = (defaults.get("uri") or "").strip()
-            royalty_default = str(defaults.get("royalty_bps") or "").strip()
-            creators_default = (defaults.get("creators") or "").strip()
-            collection_default = (defaults.get("collection") or "").strip()
+            def _resolved_default(*candidates: object, fallback: str = "") -> str:
+                for cand in candidates:
+                    if cand is None:
+                        continue
+                    text = str(cand).strip()
+                    if text:
+                        return text
+                return fallback
+
+            name_default = _resolved_default(default_name, defaults.get("name"), fallback="Untitled")
+            symbol_default = _resolved_default(default_symbol, defaults.get("symbol"), fallback="TKN")
+            uri_default = _resolved_default(default_uri, defaults.get("uri"), fallback="")
+            royalty_default = _resolved_default(default_royalty_bps, defaults.get("royalty_bps"), fallback="")
+            creators_default = _resolved_default(default_creators, defaults.get("creators"), fallback="")
+            collection_default = _resolved_default(default_collection, defaults.get("collection"), fallback="")
             name = app._prompt_text(f"Name [{name_default}]").strip() or name_default
             symbol = app._prompt_text(f"Symbol [{symbol_default}]").strip() or symbol_default
             # Storage preference and asset selection
@@ -601,6 +640,14 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     uri = uri_prompt_default
                 else:
                     uri = ""
+            if not uri:
+                auto_uri = _auto_generate_metadata_uri(app, name=name, symbol=symbol)
+                if auto_uri:
+                    uri = auto_uri
+                    app.console.print(f"[dim]Generated local metadata file at {auto_uri}[/dim]")
+                else:
+                    app.console.print("[#F97316]No metadata URI provided; metadata set requires a URI.[/]")
+                    return CommandResponse(messages=[("system", "Metadata wizard cancelled: URI is required.")])
             royalty_entry = app._prompt_text(f"Seller fee bps (optional) [{royalty_default or 'skip'}]").strip()
             if royalty_entry and royalty_entry.lower() != "skip":
                 royalty_bps = royalty_entry
@@ -886,3 +933,24 @@ def register(app: CLIApp, router: CommandRouter) -> None:
 
 
 __all__ = ["register"]
+
+
+def _auto_generate_metadata_uri(app: "CLIApp", *, name: str, symbol: str) -> str:
+    """Create a minimal local metadata JSON and return a file:// URI."""
+    try:
+        root = _workspace_root(app)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        target_dir = root / ".solcoder" / "uploads" / stamp
+        target_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "name": name,
+            "symbol": symbol,
+            "description": f"Metadata for {name} (generated by SolCoder)",
+            "image": "",
+            "attributes": [],
+        }
+        out_path = target_dir / "metadata.json"
+        out_path.write_text(json.dumps(payload, indent=2))
+        return f"file://{out_path}"
+    except Exception:
+        return ""

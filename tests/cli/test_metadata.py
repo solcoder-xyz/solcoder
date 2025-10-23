@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 from rich.console import Console
 
@@ -173,6 +173,50 @@ def test_metadata_set_run_falls_back_to_runner(monkeypatch, tmp_path: Path) -> N
     assert "On-chain metadata write completed via Umi runner." in combined
     assert runner_called["dir"]
     assert Path(runner_called["metadata_path"]).exists()
+
+
+def test_metadata_wizard_uses_provided_defaults(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True, exist_ok=True)
+    app.session_context.metadata.active_project = str(ws)
+    app.session_manager.save(app.session_context)
+
+    prompts: list[str] = []
+
+    original_dispatch = app.command_router.dispatch
+    captured_set_lines: list[str] = []
+
+    def _dispatch(self, app_obj, raw_line: str):
+        if raw_line.startswith("metadata set"):
+            captured_set_lines.append(raw_line)
+        return original_dispatch(app_obj, raw_line)
+
+    app.command_router.dispatch = MethodType(_dispatch, app.command_router)  # type: ignore[assignment]
+
+    def _prompt_text(message: str) -> str:
+        prompts.append(message)
+        if message.startswith("Write metadata on-chain now?"):
+            return "n"
+        return ""
+
+    app._prompt_text = _prompt_text  # type: ignore[assignment]
+
+    mint = "Mint11111111111111111111111111111111111111111"
+    resp = app.handle_line(
+        f"/metadata wizard --mint {mint} --default-name YOLOcoin --default-symbol YOLO"
+    )
+
+    assert resp.messages
+    assert any(prompt.startswith("Name [YOLOcoin]") for prompt in prompts)
+    assert any(prompt.startswith("Symbol [YOLO]") for prompt in prompts)
+    assert captured_set_lines, "metadata set dispatch was not invoked"
+    set_line = captured_set_lines[0]
+    assert "--name" in set_line and "YOLOcoin" in set_line
+    assert "--symbol" in set_line and "YOLO" in set_line
+    assert "--uri" in set_line
+    assert "file://" in set_line
 
 
 def test_bundlr_upload_invokes_runner(monkeypatch, tmp_path: Path) -> None:
