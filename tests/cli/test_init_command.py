@@ -33,6 +33,7 @@ def _patch_anchor_version(monkeypatch, value: str = "0.32.1") -> None:
 def test_init_offline_scaffold_in_dir(tmp_path: Path, monkeypatch) -> None:
     app = _make_app(tmp_path)
     _patch_anchor_version(monkeypatch)
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "ws"
     resp = app.handle_line(f"/init {target} --offline")
     assert any("initialized" in msg.lower() for _r, msg in resp.messages)
@@ -49,6 +50,7 @@ def test_init_offline_scaffold_in_dir(tmp_path: Path, monkeypatch) -> None:
 def test_init_detect_existing_workspace_noop(tmp_path: Path, monkeypatch) -> None:
     app = _make_app(tmp_path)
     _patch_anchor_version(monkeypatch)
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "ws2"
     # First init
     app.handle_line(f"/init {target} --offline")
@@ -61,6 +63,7 @@ def test_init_detect_existing_workspace_noop(tmp_path: Path, monkeypatch) -> Non
 def test_init_non_empty_dir_requires_force(tmp_path: Path, monkeypatch) -> None:
     app = _make_app(tmp_path)
     _patch_anchor_version(monkeypatch)
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "ws3"
     target.mkdir(parents=True, exist_ok=True)
     (target / "README.txt").write_text("hello")

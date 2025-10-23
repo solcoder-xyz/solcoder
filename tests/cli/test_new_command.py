@@ -41,6 +41,7 @@ def _patch_anchor_version(monkeypatch, value: str = "0.32.1") -> None:
 def test_new_inserts_program_into_existing_anchor_workspace(tmp_path: Path, monkeypatch) -> None:
     app = _make_app(tmp_path)
     _patch_anchor_version(monkeypatch)
+    monkeypatch.chdir(tmp_path)
 
     # Prepare a minimal Anchor workspace
     ws = tmp_path / "ws"
@@ -70,6 +71,7 @@ def test_new_inserts_program_into_existing_anchor_workspace(tmp_path: Path, monk
 def test_new_scaffolds_workspace_when_no_anchor_detected(tmp_path: Path, monkeypatch) -> None:
     app = _make_app(tmp_path)
     _patch_anchor_version(monkeypatch)
+    monkeypatch.chdir(tmp_path)
     dest = tmp_path / "fresh"
     app.handle_line(f"/new token --dir {dest} --program demo_token --force")
     # Full workspace created at dest
@@ -87,6 +89,7 @@ def test_new_scaffolds_workspace_when_no_anchor_detected(tmp_path: Path, monkeyp
 def test_new_uses_active_workspace_when_no_dir_specified(tmp_path: Path, monkeypatch) -> None:
     app = _make_app(tmp_path)
     _patch_anchor_version(monkeypatch)
+    monkeypatch.chdir(tmp_path)
     # Create an Anchor workspace and set as active project
     ws = tmp_path / "active_ws"
     ws.mkdir(parents=True, exist_ok=True)
@@ -106,6 +109,7 @@ def test_new_uses_active_workspace_when_no_dir_specified(tmp_path: Path, monkeyp
 def test_new_token_quick_flow(monkeypatch, tmp_path: Path) -> None:
     app = _make_app(tmp_path)
     _patch_anchor_version(monkeypatch)
+    monkeypatch.chdir(tmp_path)
 
     mint_address = "Mint1111111111111111111111111111111111"
     ata_address = "ATA11111111111111111111111111111111111"
