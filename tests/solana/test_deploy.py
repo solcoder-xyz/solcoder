@@ -125,6 +125,34 @@ def test_ensure_provider_wallet_preserves_existing(tmp_path: Path) -> None:
     assert updated["provider"]["cluster"] == "devnet"
 
 
+def test_ensure_toolchain_version_sets_anchor_version(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    anchor = workspace / "Anchor.toml"
+    cfg = deploy.load_anchor_config(anchor)
+
+    deploy.ensure_toolchain_version(anchor, cfg, anchor_version="0.32.1")
+    updated = deploy.load_anchor_config(anchor)
+    assert updated["toolchain"]["anchor_version"] == "0.32.1"
+
+
+def test_ensure_toolchain_version_updates_mismatch(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    anchor = workspace / "Anchor.toml"
+    anchor.write_text(
+        "[programs.devnet]\n"
+        "demo = \"replace-me\"\n\n"
+        "[provider]\n"
+        "cluster = \"devnet\"\n\n"
+        "[toolchain]\n"
+        "anchor_version = \"0.30.1\"\n"
+    )
+    cfg = deploy.load_anchor_config(anchor)
+
+    deploy.ensure_toolchain_version(anchor, cfg, anchor_version="0.32.1")
+    updated = deploy.load_anchor_config(anchor)
+    assert updated["toolchain"]["anchor_version"] == "0.32.1"
+
+
 def test_verify_workspace_reports_missing_anchor(monkeypatch, tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
 

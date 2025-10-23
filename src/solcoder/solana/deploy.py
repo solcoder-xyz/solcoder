@@ -242,6 +242,43 @@ def ensure_provider_wallet(
     if updated:
         save_anchor_config(anchor_path, anchor_config)
 
+
+def detect_anchor_cli_version() -> str | None:
+    """Return the installed anchor CLI version (major.minor.patch) if available."""
+    anchor_path = shutil.which("anchor")
+    if not anchor_path:
+        return None
+    try:
+        completed = subprocess.run(  # noqa: S603,S607
+            [anchor_path, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    output = (completed.stdout or completed.stderr or "").strip()
+    match = re.search(r"anchor(?:-cli)?\s+([0-9]+(?:\.[0-9]+){0,2})", output)
+    return match.group(1) if match else None
+
+
+def ensure_toolchain_version(
+    anchor_path: Path,
+    anchor_config: dict[str, Any],
+    *,
+    anchor_version: str | None,
+) -> None:
+    """Persist the anchor CLI version into the Anchor toolchain block when missing."""
+    if not anchor_version:
+        return
+    toolchain = anchor_config.setdefault("toolchain", {})
+    if not isinstance(toolchain, dict):
+        anchor_config["toolchain"] = {}
+        toolchain = anchor_config["toolchain"]
+    if toolchain.get("anchor_version") != anchor_version:
+        toolchain["anchor_version"] = anchor_version
+        save_anchor_config(anchor_path, anchor_config)
+
 def run_anchor_command(
     command: Sequence[str],
     *,
@@ -435,6 +472,9 @@ __all__ = [
     "DeployVerification",
     "discover_anchor_root",
     "ensure_program_keypair",
+    "ensure_provider_wallet",
+    "ensure_toolchain_version",
+    "detect_anchor_cli_version",
     "infer_program_name",
     "load_anchor_config",
     "resolve_cluster",

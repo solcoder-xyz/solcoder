@@ -141,6 +141,11 @@ def _handle_deploy(app: CLIApp, args: list[str]) -> CommandResponse:
                 wallet_path=status.wallet_path,
                 cluster=cluster,
             )
+        deploy_mod.ensure_toolchain_version(
+            anchor_path,
+            anchor_cfg,
+            anchor_version=deploy_mod.detect_anchor_cli_version(),
+        )
         program_keypair, program_id = _prepare_program(workspace, program_name, cluster, anchor_path, anchor_cfg)
     except deploy_mod.DeployError as exc:
         return CommandResponse(messages=[("system", f"Program preparation failed: {exc}")])
