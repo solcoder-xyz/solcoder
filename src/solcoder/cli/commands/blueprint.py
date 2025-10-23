@@ -13,6 +13,7 @@ from solcoder.cli.blueprints import (
     normalise_program_name,
     resolve_registry_template_path,
 )
+from solcoder.solana import deploy as deploy_mod
 import re
 import shutil
 
@@ -149,6 +150,15 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                     else:
                         text = text.rstrip() + f"\n\n{sect}\n{prog_line}\n"
                     anchor_toml.write_text(text)
+                    try:
+                        cfg = deploy_mod.load_anchor_config(anchor_toml)
+                        deploy_mod.ensure_toolchain_version(
+                            anchor_toml,
+                            cfg,
+                            anchor_version=deploy_mod.detect_anchor_cli_version(),
+                        )
+                    except Exception:
+                        pass
                     # patch Cargo.toml
                     cargo = workspace / "Cargo.toml"
                     ctext = cargo.read_text() if cargo.exists() else ""
@@ -193,6 +203,17 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             pass
         app.session_context.metadata.active_project = str(target)
         app.session_manager.save(app.session_context)
+        try:
+            anchor_path = target / "Anchor.toml"
+            if anchor_path.exists():
+                cfg = deploy_mod.load_anchor_config(anchor_path)
+                deploy_mod.ensure_toolchain_version(
+                    anchor_path,
+                    cfg,
+                    anchor_version=deploy_mod.detect_anchor_cli_version(),
+                )
+        except Exception:
+            pass
         return CommandResponse(messages=[("system", f"Blueprint '{key}' rendered to {target}")])
 
     router.register(SlashCommand("blueprint", handle, "Internal blueprint scaffolder"))

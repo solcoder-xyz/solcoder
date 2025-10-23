@@ -31,8 +31,16 @@ def _make_app(tmp_path: Path) -> CLIApp:
     return app
 
 
-def test_new_inserts_program_into_existing_anchor_workspace(tmp_path: Path) -> None:
+def _patch_anchor_version(monkeypatch, value: str = "0.32.1") -> None:
+    monkeypatch.setattr(
+        "solcoder.cli.commands.blueprint.deploy_mod.detect_anchor_cli_version",
+        lambda: value,
+    )
+
+
+def test_new_inserts_program_into_existing_anchor_workspace(tmp_path: Path, monkeypatch) -> None:
     app = _make_app(tmp_path)
+    _patch_anchor_version(monkeypatch)
 
     # Prepare a minimal Anchor workspace
     ws = tmp_path / "ws"
@@ -51,6 +59,7 @@ def test_new_inserts_program_into_existing_anchor_workspace(tmp_path: Path) -> N
     anchor_text = (ws / "Anchor.toml").read_text()
     assert "[programs.devnet]" in anchor_text
     assert "my_token = \"replace-with-program-id\"" in anchor_text
+    assert 'anchor_version = "0.32.1"' in anchor_text
     # Cargo workspace includes member
     cargo_text = (ws / "Cargo.toml").read_text()
     assert '"programs/my_token"' in cargo_text
@@ -58,8 +67,9 @@ def test_new_inserts_program_into_existing_anchor_workspace(tmp_path: Path) -> N
     assert any(p.name.endswith(".ts") for p in (ws / "tests").glob("*.ts"))
 
 
-def test_new_scaffolds_workspace_when_no_anchor_detected(tmp_path: Path) -> None:
+def test_new_scaffolds_workspace_when_no_anchor_detected(tmp_path: Path, monkeypatch) -> None:
     app = _make_app(tmp_path)
+    _patch_anchor_version(monkeypatch)
     dest = tmp_path / "fresh"
     app.handle_line(f"/new token --dir {dest} --program demo_token --force")
     # Full workspace created at dest
@@ -70,10 +80,13 @@ def test_new_scaffolds_workspace_when_no_anchor_detected(tmp_path: Path) -> None
     assert (dest / "scripts" / "mint.ts").exists()
     # Active project updated
     assert app.session_context.metadata.active_project == str(dest)
+    anchor_text = (dest / "Anchor.toml").read_text()
+    assert 'anchor_version = "0.32.1"' in anchor_text
 
 
-def test_new_uses_active_workspace_when_no_dir_specified(tmp_path: Path) -> None:
+def test_new_uses_active_workspace_when_no_dir_specified(tmp_path: Path, monkeypatch) -> None:
     app = _make_app(tmp_path)
+    _patch_anchor_version(monkeypatch)
     # Create an Anchor workspace and set as active project
     ws = tmp_path / "active_ws"
     ws.mkdir(parents=True, exist_ok=True)
@@ -86,10 +99,13 @@ def test_new_uses_active_workspace_when_no_dir_specified(tmp_path: Path) -> None
     # Run /new without --dir; should insert into active workspace
     app.handle_line("/new token --program my_tok --force")
     assert (ws / "programs" / "my_tok").is_dir()
+    anchor_text = (ws / "Anchor.toml").read_text()
+    assert 'anchor_version = "0.32.1"' in anchor_text
 
 
 def test_new_token_quick_flow(monkeypatch, tmp_path: Path) -> None:
     app = _make_app(tmp_path)
+    _patch_anchor_version(monkeypatch)
 
     mint_address = "Mint1111111111111111111111111111111111"
     ata_address = "ATA11111111111111111111111111111111111"

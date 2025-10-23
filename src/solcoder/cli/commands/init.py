@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
+from solcoder.solana import deploy as deploy_mod
 
 if TYPE_CHECKING:  # pragma: no cover
     from solcoder.cli.app import CLIApp
@@ -161,6 +162,17 @@ def register(app: CLIApp, router: CommandRouter) -> None:
         # Persist active project and return summary
         app.session_context.metadata.active_project = str(workspace_root)
         app.session_manager.save(app.session_context)
+        # Align Anchor toolchain version with installed CLI when available
+        try:
+            anchor_path = workspace_root / "Anchor.toml"
+            cfg = deploy_mod.load_anchor_config(anchor_path)
+            deploy_mod.ensure_toolchain_version(
+                anchor_path,
+                cfg,
+                anchor_version=deploy_mod.detect_anchor_cli_version(),
+            )
+        except Exception:
+            pass
         # Persist as project-level default for future sessions
         try:
             # Find project .solcoder directory relative to CWD
