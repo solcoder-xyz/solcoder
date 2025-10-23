@@ -7,7 +7,8 @@ function sh(cmd: string) {
 }
 
 const RPC = process.env.SOLANA_URL || 'https://api.devnet.solana.com';
-const PROGRAM_2022 = '--program-2022';
+const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+const PROGRAM_ARGS = `--program-id ${TOKEN_2022_PROGRAM_ID}`;
 
 const MINT = process.env.MINT || '<REPLACE_WITH_MINT>'; // mint address
 const DEST = process.env.DEST || '<REPLACE_WITH_DEST_ATA>'; // destination ATA
@@ -19,6 +20,5 @@ if (MINT.startsWith('<')) {
 }
 
 console.log('Transferring tokens...');
-sh(`spl-token transfer ${MINT} ${AMOUNT} ${DEST} ${PROGRAM_2022} -u ${RPC}`);
+sh(`spl-token transfer ${MINT} ${AMOUNT} ${DEST} ${PROGRAM_ARGS} -u ${RPC}`);
 console.log('Done');
-

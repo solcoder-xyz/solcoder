@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("replace-with-program-id");
+declare_id!("DFvzyv1onfttLVHT9DFXDPK1ckamcr7UgpxhhSCMP9ia");
 
 #[program]
 pub mod nft {

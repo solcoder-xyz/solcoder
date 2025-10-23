@@ -45,6 +45,7 @@ class CommandResult:
     returncode: int
     stdout: str
     stderr: str
+    metadata: dict[str, Any] | None = None
 
     @property
     def success(self) -> bool:
@@ -249,16 +250,40 @@ def run_anchor_command(
 def run_anchor_build(
     *,
     project_root: Path,
+    program_name: str,
     env: Mapping[str, str] | None = None,
     timeout: int = 900,
 ) -> CommandResult:
-    """Run `anchor build` in the given workspace."""
-    return run_anchor_command(
+    """Build the program, preferring `solana program build` and falling back to `anchor build` when necessary."""
+    program_path = project_root / "programs" / program_name
+    primary = run_anchor_command(
+        ["solana", "program", "build", str(program_path)],
+        cwd=project_root,
+        env=env,
+        timeout=timeout,
+    )
+    primary.metadata = {"builder": "solana program build"}
+    if primary.success:
+        return primary
+
+    fallback = run_anchor_command(
         ["anchor", "build"],
         cwd=project_root,
         env=env,
         timeout=timeout,
     )
+    fallback.metadata = {
+        "builder": "anchor build",
+        "fallback_reason": "solana program build failed; attempting anchor build instead.",
+        "initial_error": {
+            "command": primary.command,
+            "stdout": primary.stdout,
+            "stderr": primary.stderr,
+            "returncode": primary.returncode,
+        },
+    }
+    fallback.duration_secs += primary.duration_secs
+    return fallback
 
 
 def run_anchor_deploy(

@@ -183,23 +183,37 @@ def _handle_deploy(app: CLIApp, args: list[str]) -> CommandResponse:
 
         build_result = None
         if not skip_build:
-            app.console.print("Running anchor build…")
-            app.log_buffer.record("deploy", "anchor build started")
-            build_result = deploy_mod.run_anchor_build(project_root=workspace, env=env)
+            app.console.print("Running solana program build…")
+            app.log_buffer.record("deploy", "solana program build started")
+            build_result = deploy_mod.run_anchor_build(
+                project_root=workspace,
+                program_name=program_name,
+                env=env,
+            )
             if not build_result.success:
                 _record_failure_logs(app, build_result, phase="build")
+                failure_label = (build_result.metadata or {}).get("builder", "program build")
                 return CommandResponse(
                     messages=[
                         (
                             "system",
-                            _format_failure("anchor build failed", build_result),
+                            _format_failure(f"{failure_label} failed", build_result),
                         )
                     ]
                 )
-            app.log_buffer.record(
-                "build",
-                f"anchor build completed in {build_result.duration_secs:.1f}s",
-            )
+            builder_label = (build_result.metadata or {}).get("builder", "solana program build")
+            fallback_reason = (build_result.metadata or {}).get("fallback_reason")
+            if fallback_reason:
+                app.console.print(f"[#FACC15]{builder_label} fallback: {fallback_reason}[/]")
+                app.log_buffer.record(
+                    "build",
+                    f"{builder_label} completed in {build_result.duration_secs:.1f}s (fallback from solana program build)",
+                )
+            else:
+                app.log_buffer.record(
+                    "build",
+                    f"{builder_label} completed in {build_result.duration_secs:.1f}s",
+                )
 
         app.console.print("Running anchor deploy…")
         app.log_buffer.record("deploy", "anchor deploy started")
@@ -343,15 +357,16 @@ def _write_temp_key(secret: str) -> Path:
 
 
 def _record_failure_logs(app: CLIApp, result, *, phase: str) -> None:
+    builder = (getattr(result, "metadata", None) or {}).get("builder", f"anchor {phase}")
     app.log_buffer.record(
         "deploy",
-        f"anchor {phase} failed with code {result.returncode}",
+        f"{builder} failed with code {result.returncode}",
         severity="error",
     )
     if result.stdout:
-        app.log_buffer.record("deploy", f"{phase} stdout: {result.stdout[-2000:]}")
+        app.log_buffer.record("deploy", f"{builder} stdout: {result.stdout[-2000:]}")
     if result.stderr:
-        app.log_buffer.record("deploy", f"{phase} stderr: {result.stderr[-2000:]}", severity="error")
+        app.log_buffer.record("deploy", f"{builder} stderr: {result.stderr[-2000:]}", severity="error")
 
 
 def _format_failure(prefix: str, result) -> str:
@@ -360,6 +375,16 @@ def _format_failure(prefix: str, result) -> str:
         lines.extend(["stdout:", result.stdout])
     if result.stderr:
         lines.extend(["stderr:", result.stderr])
+    initial = (getattr(result, "metadata", None) or {}).get("initial_error")
+    if initial:
+        lines.append("")
+        lines.append("Initial anchor build failure:")
+        if initial.get("stdout"):
+            lines.extend(["stdout:", str(initial.get("stdout"))])
+        if initial.get("stderr"):
+            lines.extend(["stderr:", str(initial.get("stderr"))])
+        if initial.get("returncode") is not None:
+            lines.append(f"exit code: {initial.get('returncode')}")
     return "\n".join(lines)
 
 

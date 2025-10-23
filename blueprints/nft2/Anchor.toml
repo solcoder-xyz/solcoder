@@ -4,5 +4,4 @@
 cluster = "devnet"
 
 [programs.devnet]
-nft = "replace-with-program-id"
-
+nft = "DFvzyv1onfttLVHT9DFXDPK1ckamcr7UgpxhhSCMP9ia"

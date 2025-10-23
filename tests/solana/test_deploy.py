@@ -56,6 +56,40 @@ def test_run_anchor_deploy_parses_program_id(monkeypatch, tmp_path: Path) -> Non
     assert result.program_id == "Demo111111111111111111111111111111111111111"
 
 
+def test_run_anchor_build_primary_succeeds(monkeypatch, tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+
+    def fake_run(cmd, cwd, capture_output, text, env, timeout, check):  # noqa: ARG001
+        assert cmd[:3] == ["solana", "program", "build"]
+        return SimpleNamespace(returncode=0, stdout="Built successfully", stderr="")
+
+    monkeypatch.setattr(deploy.subprocess, "run", fake_run)
+    result = deploy.run_anchor_build(project_root=workspace, program_name="demo")
+    assert result.success
+    assert (result.metadata or {}).get("builder") == "solana program build"
+
+
+def test_run_anchor_build_fallbacks_to_anchor_build(monkeypatch, tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, cwd, capture_output, text, env, timeout, check):  # noqa: ARG001
+        calls.append(cmd)
+        if cmd[:3] == ["solana", "program", "build"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="solana CLI build failed")
+        if cmd[:2] == ["anchor", "build"]:
+            return SimpleNamespace(returncode=0, stdout="Anchor build ok", stderr="")
+        raise AssertionError(f"Unexpected command {cmd}")
+
+    monkeypatch.setattr(deploy.subprocess, "run", fake_run)
+    result = deploy.run_anchor_build(project_root=workspace, program_name="demo")
+    assert result.success
+    assert (result.metadata or {}).get("builder") == "anchor build"
+    assert (result.metadata or {}).get("initial_error") is not None
+    assert calls[0][:3] == ["solana", "program", "build"]
+    assert calls[1][:2] == ["anchor", "build"]
+
+
 def test_verify_workspace_reports_missing_anchor(monkeypatch, tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
 
