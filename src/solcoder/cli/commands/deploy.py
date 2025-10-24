@@ -238,6 +238,7 @@ def _handle_deploy(app: CLIApp, args: list[str]) -> CommandResponse:
             project_root=workspace,
             program_name=program_name,
             program_keypair=program_keypair,
+            provider_wallet=tmp_key,
             env=env,
         )
         if not deploy_result.success:

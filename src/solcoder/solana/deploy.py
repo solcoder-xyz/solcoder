@@ -235,9 +235,17 @@ def ensure_provider_wallet(
 
     wallet_str = str(wallet_path.expanduser())
     current_wallet = provider.get("wallet")
-    if wallet_str and (not isinstance(current_wallet, str) or not current_wallet.strip()):
-        provider["wallet"] = wallet_str
-        updated = True
+    if wallet_str:
+        normalized_current: str | None = None
+        current_exists = False
+        if isinstance(current_wallet, str) and current_wallet.strip():
+            current_path = Path(current_wallet).expanduser()
+            normalized_current = str(current_path)
+            current_exists = current_path.exists()
+        if not current_exists or normalized_current == wallet_str:
+            if normalized_current != wallet_str:
+                provider["wallet"] = wallet_str
+                updated = True
 
     if updated:
         save_anchor_config(anchor_path, anchor_config)
@@ -476,6 +484,7 @@ def run_anchor_deploy(
     project_root: Path,
     program_name: str,
     program_keypair: Path,
+    provider_wallet: Path | None = None,
     env: Mapping[str, str] | None = None,
     timeout: int = 900,
 ) -> AnchorDeployResult:
@@ -483,11 +492,13 @@ def run_anchor_deploy(
     cmd = [
         "anchor",
         "deploy",
-        "--program",
+        "--program-name",
         program_name,
         "--program-keypair",
         str(program_keypair),
     ]
+    if provider_wallet is not None:
+        cmd.extend(["--provider.wallet", str(provider_wallet)])
     result = run_anchor_command(cmd, cwd=project_root, env=env, timeout=timeout)
     program_id = extract_program_id(result.stdout) or extract_program_id(result.stderr)
     return AnchorDeployResult(

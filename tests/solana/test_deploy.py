@@ -45,13 +45,23 @@ def test_run_anchor_deploy_parses_program_id(monkeypatch, tmp_path: Path) -> Non
     workspace.mkdir()
     keypair = workspace / "demo.json"
     keypair.write_text("[]")
+    wallet = workspace / "wallet.json"
+    wallet.write_text("[]")
 
     def fake_run(cmd, cwd, capture_output, text, env=None, timeout=None, check=False):  # noqa: ARG001
         assert cmd[:2] == ["anchor", "deploy"]
+        assert "--provider.wallet" in cmd
+        wallet_index = cmd.index("--provider.wallet")
+        assert cmd[wallet_index + 1] == str(wallet)
         return SimpleNamespace(returncode=0, stdout="Program Id: Demo111111111111111111111111111111111111111", stderr="")
 
     monkeypatch.setattr(deploy.subprocess, "run", fake_run)
-    result = deploy.run_anchor_deploy(project_root=workspace, program_name="demo", program_keypair=keypair)
+    result = deploy.run_anchor_deploy(
+        project_root=workspace,
+        program_name="demo",
+        program_keypair=keypair,
+        provider_wallet=wallet,
+    )
     assert result.success
     assert result.program_id == "Demo111111111111111111111111111111111111111"
 
@@ -182,15 +192,38 @@ def test_ensure_provider_wallet_sets_defaults(tmp_path: Path) -> None:
     assert updated["provider"]["cluster"] == "devnet"
 
 
-def test_ensure_provider_wallet_preserves_existing(tmp_path: Path) -> None:
+def test_ensure_provider_wallet_respects_existing(tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
     anchor = workspace / "Anchor.toml"
+    existing_wallet = workspace / "existing-wallet.json"
     anchor.write_text(
         "[programs.devnet]\n"
         "demo = \"replace-me\"\n\n"
         "[provider]\n"
         "cluster = \"devnet\"\n"
-        "wallet = \"/custom/wallet.json\"\n"
+        f"wallet = \"{existing_wallet}\"\n"
+    )
+    cfg = deploy.load_anchor_config(anchor)
+    existing_wallet.parent.mkdir(parents=True, exist_ok=True)
+    existing_wallet.write_text("[]")
+
+    wallet_path = workspace / ".solcoder" / "keys" / "default_wallet.json"
+    wallet_path.parent.mkdir(parents=True, exist_ok=True)
+    wallet_path.write_text("[]")
+
+    deploy.ensure_provider_wallet(anchor, cfg, wallet_path=wallet_path, cluster="devnet")
+    updated = deploy.load_anchor_config(anchor)
+    assert updated["provider"]["wallet"] == str(existing_wallet)
+    assert updated["provider"]["cluster"] == "devnet"
+
+
+def test_ensure_provider_wallet_replaces_missing(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    anchor = workspace / "Anchor.toml"
+    anchor.write_text(
+        "[provider]\n"
+        "wallet = \"/does/not/exist.json\"\n"
+        "cluster = \"devnet\"\n"
     )
     cfg = deploy.load_anchor_config(anchor)
     wallet_path = workspace / ".solcoder" / "keys" / "default_wallet.json"
@@ -199,8 +232,7 @@ def test_ensure_provider_wallet_preserves_existing(tmp_path: Path) -> None:
 
     deploy.ensure_provider_wallet(anchor, cfg, wallet_path=wallet_path, cluster="devnet")
     updated = deploy.load_anchor_config(anchor)
-    assert updated["provider"]["wallet"] == "/custom/wallet.json"
-    assert updated["provider"]["cluster"] == "devnet"
+    assert updated["provider"]["wallet"] == str(wallet_path)
 
 
 def test_ensure_toolchain_version_sets_anchor_version(tmp_path: Path) -> None:
