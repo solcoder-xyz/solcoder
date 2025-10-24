@@ -288,8 +288,15 @@ def _lockfile_requires_downgrade(result: CommandResult) -> bool:
 def _regenerate_lockfile(project_root: Path) -> tuple[bool, str | None, float]:
     """Attempt to regenerate Cargo.lock with the Solana toolchain."""
     start = time.perf_counter()
+
+    rewritten, rewrite_msg = _downgrade_lockfile_version(project_root)
+    if rewritten:
+        return True, rewrite_msg, time.perf_counter() - start
+
     attempts = [
+        ["cargo", "+solana", "generate-lockfile", "--offline"],
         ["cargo", "+solana", "generate-lockfile"],
+        ["cargo", "generate-lockfile", "--offline"],
         ["cargo", "generate-lockfile"],
     ]
     last_error: str | None = None
@@ -311,6 +318,26 @@ def _regenerate_lockfile(project_root: Path) -> tuple[bool, str | None, float]:
             return True, message, duration
         last_error = completed.stderr.strip() or completed.stdout.strip() or f"{' '.join(cmd)} failed"
     return False, last_error, time.perf_counter() - start
+
+
+def _downgrade_lockfile_version(project_root: Path) -> tuple[bool, str | None]:
+    lock_path = project_root / "Cargo.lock"
+    if not lock_path.exists():
+        return False, None
+    try:
+        text = lock_path.read_text()
+    except Exception:
+        return False, None
+    if "version = 4" not in text:
+        return False, None
+    updated = text.replace("version = 4", "version = 3", 1)
+    if updated == text:
+        return False, None
+    try:
+        lock_path.write_text(updated)
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+    return True, "Cargo.lock downgraded to format version 3 for solana toolchain."
 
 def run_anchor_command(
     command: Sequence[str],

@@ -93,6 +93,13 @@ def test_run_anchor_build_fallbacks_to_anchor_build(monkeypatch, tmp_path: Path)
 def test_run_anchor_build_regenerates_lockfile(monkeypatch, tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
     calls: list[list[str]] = []
+    lock_path = workspace / "Cargo.lock"
+    lock_path.write_text("# Autogen\nversion = 4\n")
+
+    def fake_downgrade(root: Path) -> tuple[bool, str | None]:
+        text = lock_path.read_text()
+        lock_path.write_text(text.replace("version = 4", "version = 3", 1))
+        return True, "downgraded"
 
     def fake_run(cmd, cwd, capture_output, text, env=None, timeout=None, check=False):  # noqa: ARG001
         calls.append(cmd)
@@ -108,13 +115,26 @@ def test_run_anchor_build_regenerates_lockfile(monkeypatch, tmp_path: Path) -> N
             return SimpleNamespace(returncode=0, stdout="", stderr="")
         raise AssertionError(f"Unexpected command {cmd}")
 
+    monkeypatch.setattr(deploy, "_downgrade_lockfile_version", fake_downgrade)
     monkeypatch.setattr(deploy.subprocess, "run", fake_run)
     result = deploy.run_anchor_build(project_root=workspace, program_name="demo")
     assert result.success
     assert (result.metadata or {}).get("lockfile_regenerated")
     assert calls[0][:3] == ["solana", "program", "build"]
-    assert calls[1][:3] == ["cargo", "+solana", "generate-lockfile"]
-    assert calls[2][:3] == ["solana", "program", "build"]
+    assert calls[1][:3] == ["solana", "program", "build"]
+    lock_text = lock_path.read_text()
+    assert "version = 3" in lock_text
+
+
+def test_downgrade_lockfile_version(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    lock = ws / "Cargo.lock"
+    lock.write_text("# Autogen\nversion = 4\n")
+    ok, msg = deploy._downgrade_lockfile_version(ws)
+    assert ok
+    assert msg
+    assert "version = 3" in lock.read_text()
 
 
 def test_ensure_provider_wallet_sets_defaults(tmp_path: Path) -> None:
