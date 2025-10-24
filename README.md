@@ -446,6 +446,12 @@ See `docs/roadmap/` for detailed milestones, tasks, and in-progress work.
 - 🐛 **[GitHub Issues](https://github.com/solcoder/SolCoder/issues)** — Report bugs or suggest features
 - 🔐 **Security** — For wallet or deployment issues, include CLI output (with secrets redacted)
 
+## 📞 **Contact**
+
+- 🐦 **X** — [@solcoderxyz](https://x.com/solcoderxyz)
+- 📧 **Email** — [contact@solcoder.xyz](mailto:contact@solcoder.xyz)
+- 💬 **Telegram** — [Join our community](https://t.me/+pNKuDgtZ0H9lM2U0)
+
 ---
 
 ## 📜 **License**
