@@ -287,9 +287,20 @@ def _resolve_workspace(app: CLIApp) -> Path | None:
     metadata = getattr(app.session_context, "metadata", None)
     candidates: list[Path] = []
     if metadata and metadata.active_project:
-        candidates.append(Path(metadata.active_project).expanduser())
+        active = Path(metadata.active_project).expanduser()
+        if active.exists():
+            candidates.append(active)
+        else:
+            # Clear stale reference so future commands don't reuse it
+            metadata.active_project = None
+            try:
+                app.session_manager.save(app.session_context)
+            except Exception:
+                pass
     candidates.append(Path.cwd())
     for candidate in candidates:
+        if not candidate.exists():
+            continue
         root = deploy_mod.discover_anchor_root(candidate)
         if root is not None:
             return root
