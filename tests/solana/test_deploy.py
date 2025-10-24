@@ -94,12 +94,21 @@ def test_run_anchor_build_regenerates_lockfile(monkeypatch, tmp_path: Path) -> N
     workspace = _make_workspace(tmp_path)
     calls: list[list[str]] = []
     lock_path = workspace / "Cargo.lock"
-    lock_path.write_text("# Autogen\nversion = 4\n")
+    lock_path.write_text(
+        "# Autogen\nversion = 4\n"
+        "dependencies = [\n \"toml_datetime 0.7.3\",\n]\n"
+        "[[package]]\nname = \"toml_datetime\"\nversion = \"0.7.3\"\n"
+    )
 
     def fake_downgrade(root: Path) -> tuple[bool, str | None]:
+        return False, None
+
+    def fake_pin(root: Path) -> tuple[bool, str | None]:
         text = lock_path.read_text()
-        lock_path.write_text(text.replace("version = 4", "version = 3", 1))
-        return True, "downgraded"
+        lock_path.write_text(
+            text.replace("version = 4", "version = 3", 1).replace("toml_datetime 0.7.3", "toml_datetime 0.6.11")
+        )
+        return True, "pinned"
 
     def fake_run(cmd, cwd, capture_output, text, env=None, timeout=None, check=False):  # noqa: ARG001
         calls.append(cmd)
@@ -116,6 +125,7 @@ def test_run_anchor_build_regenerates_lockfile(monkeypatch, tmp_path: Path) -> N
         raise AssertionError(f"Unexpected command {cmd}")
 
     monkeypatch.setattr(deploy, "_downgrade_lockfile_version", fake_downgrade)
+    monkeypatch.setattr(deploy, "_pin_incompatible_crates", fake_pin)
     monkeypatch.setattr(deploy.subprocess, "run", fake_run)
     result = deploy.run_anchor_build(project_root=workspace, program_name="demo")
     assert result.success
@@ -124,6 +134,27 @@ def test_run_anchor_build_regenerates_lockfile(monkeypatch, tmp_path: Path) -> N
     assert calls[1][:3] == ["solana", "program", "build"]
     lock_text = lock_path.read_text()
     assert "version = 3" in lock_text
+    assert "toml_datetime 0.6.11" in lock_text
+
+
+def test_pin_incompatible_crates(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    lock = ws / "Cargo.lock"
+    lock.write_text(
+        "# Autogen\nversion = 4\n"
+        "[[package]]\nname = \"toml_datetime\"\nversion = \"0.7.3\"\n"
+        "source = \"registry+https://example\"\nchecksum = \"abc\"\n"
+        "dependencies = []\n"
+        "[[package]]\nname = \"example\"\nversion = \"0.1.0\"\n"
+        "dependencies = [\n \"toml_datetime 0.7.3\",\n]\n"
+    )
+    updated, message = deploy._pin_incompatible_crates(ws)
+    assert updated
+    assert message
+    contents = lock.read_text()
+    assert "toml_datetime 0.7.3" not in contents
+    assert "toml_datetime 0.6.11" in contents
 
 
 def test_downgrade_lockfile_version(tmp_path: Path) -> None:

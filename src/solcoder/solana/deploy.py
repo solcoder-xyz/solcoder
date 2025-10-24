@@ -293,6 +293,10 @@ def _regenerate_lockfile(project_root: Path) -> tuple[bool, str | None, float]:
     if rewritten:
         return True, rewrite_msg, time.perf_counter() - start
 
+    pinned, pinned_msg = _pin_incompatible_crates(project_root)
+    if pinned:
+        return True, pinned_msg, time.perf_counter() - start
+
     attempts = [
         ["cargo", "+solana", "generate-lockfile", "--offline"],
         ["cargo", "+solana", "generate-lockfile"],
@@ -338,6 +342,39 @@ def _downgrade_lockfile_version(project_root: Path) -> tuple[bool, str | None]:
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)
     return True, "Cargo.lock downgraded to format version 3 for solana toolchain."
+
+
+def _pin_incompatible_crates(project_root: Path) -> tuple[bool, str | None]:
+    lock_path = project_root / "Cargo.lock"
+    if not lock_path.exists():
+        return False, None
+    try:
+        text = lock_path.read_text()
+    except Exception:
+        return False, None
+
+    modified = False
+    messages: list[str] = []
+
+    if "toml_datetime 0.7.3" in text or 'version = "0.7.3"' in text:
+        new_text = text.replace('"toml_datetime 0.7.3"', '"toml_datetime 0.6.11"')
+        block_pattern = re.compile(
+            r"\[\[package\]\]\nname = \"toml_datetime\"\nversion = \"0\.7\.3\"\n(?:.*?\n)(?=\[\[package\]\]|\Z)",
+            re.S,
+        )
+        new_text, count = block_pattern.subn("", new_text)
+        if count > 0 or new_text != text:
+            new_text = re.sub(r"\n{3,}", "\n\n", new_text)
+            try:
+                lock_path.write_text(new_text)
+            except Exception as exc:  # noqa: BLE001
+                return False, str(exc)
+            modified = True
+            messages.append("Pinned toml_datetime to 0.6.11 for Solana toolchain compatibility.")
+
+    if modified:
+        return True, " ".join(messages) if messages else "Updated Cargo.lock for Solana toolchain."
+    return False, None
 
 def run_anchor_command(
     command: Sequence[str],
