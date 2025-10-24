@@ -216,6 +216,10 @@ def _handle_deploy(app: CLIApp, args: list[str]) -> CommandResponse:
                 )
             builder_label = (build_result.metadata or {}).get("builder", "solana program build")
             fallback_reason = (build_result.metadata or {}).get("fallback_reason")
+            if (build_result.metadata or {}).get("lockfile_regenerated"):
+                lock_msg = (build_result.metadata or {}).get("lockfile_message", "Cargo.lock regenerated with solana toolchain.")
+                app.console.print(f"[#34D399]{lock_msg}[/]")
+                app.log_buffer.record("build", lock_msg)
             if fallback_reason:
                 app.console.print(f"[#FACC15]{builder_label} fallback: {fallback_reason}[/]")
                 app.log_buffer.record(

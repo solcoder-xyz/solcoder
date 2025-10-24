@@ -46,7 +46,7 @@ def test_run_anchor_deploy_parses_program_id(monkeypatch, tmp_path: Path) -> Non
     keypair = workspace / "demo.json"
     keypair.write_text("[]")
 
-    def fake_run(cmd, cwd, capture_output, text, env, timeout, check):  # noqa: ARG001
+    def fake_run(cmd, cwd, capture_output, text, env=None, timeout=None, check=False):  # noqa: ARG001
         assert cmd[:2] == ["anchor", "deploy"]
         return SimpleNamespace(returncode=0, stdout="Program Id: Demo111111111111111111111111111111111111111", stderr="")
 
@@ -59,7 +59,7 @@ def test_run_anchor_deploy_parses_program_id(monkeypatch, tmp_path: Path) -> Non
 def test_run_anchor_build_primary_succeeds(monkeypatch, tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
 
-    def fake_run(cmd, cwd, capture_output, text, env, timeout, check):  # noqa: ARG001
+    def fake_run(cmd, cwd, capture_output, text, env=None, timeout=None, check=False):  # noqa: ARG001
         assert cmd[:3] == ["solana", "program", "build"]
         return SimpleNamespace(returncode=0, stdout="Built successfully", stderr="")
 
@@ -73,7 +73,7 @@ def test_run_anchor_build_fallbacks_to_anchor_build(monkeypatch, tmp_path: Path)
     workspace = _make_workspace(tmp_path)
     calls: list[list[str]] = []
 
-    def fake_run(cmd, cwd, capture_output, text, env, timeout, check):  # noqa: ARG001
+    def fake_run(cmd, cwd, capture_output, text, env=None, timeout=None, check=False):  # noqa: ARG001
         calls.append(cmd)
         if cmd[:3] == ["solana", "program", "build"]:
             return SimpleNamespace(returncode=1, stdout="", stderr="solana CLI build failed")
@@ -88,6 +88,33 @@ def test_run_anchor_build_fallbacks_to_anchor_build(monkeypatch, tmp_path: Path)
     assert (result.metadata or {}).get("initial_error") is not None
     assert calls[0][:3] == ["solana", "program", "build"]
     assert calls[1][:2] == ["anchor", "build"]
+
+
+def test_run_anchor_build_regenerates_lockfile(monkeypatch, tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, cwd, capture_output, text, env=None, timeout=None, check=False):  # noqa: ARG001
+        calls.append(cmd)
+        if cmd[:3] == ["solana", "program", "build"]:
+            if len(calls) == 1:
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr="error: failed to parse lock file\nlock file version 4 requires `-Znext-lockfile-bump`",
+                )
+            return SimpleNamespace(returncode=0, stdout="Built successfully", stderr="")
+        if cmd[:3] == ["cargo", "+solana", "generate-lockfile"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"Unexpected command {cmd}")
+
+    monkeypatch.setattr(deploy.subprocess, "run", fake_run)
+    result = deploy.run_anchor_build(project_root=workspace, program_name="demo")
+    assert result.success
+    assert (result.metadata or {}).get("lockfile_regenerated")
+    assert calls[0][:3] == ["solana", "program", "build"]
+    assert calls[1][:3] == ["cargo", "+solana", "generate-lockfile"]
+    assert calls[2][:3] == ["solana", "program", "build"]
 
 
 def test_ensure_provider_wallet_sets_defaults(tmp_path: Path) -> None:

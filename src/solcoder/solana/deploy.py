@@ -279,6 +279,39 @@ def ensure_toolchain_version(
         toolchain["anchor_version"] = anchor_version
         save_anchor_config(anchor_path, anchor_config)
 
+
+def _lockfile_requires_downgrade(result: CommandResult) -> bool:
+    combined = f"{result.stdout}\n{result.stderr}".lower()
+    return "lock file version 4" in combined and "requires `-znext-lockfile-bump`" in combined
+
+
+def _regenerate_lockfile(project_root: Path) -> tuple[bool, str | None, float]:
+    """Attempt to regenerate Cargo.lock with the Solana toolchain."""
+    start = time.perf_counter()
+    attempts = [
+        ["cargo", "+solana", "generate-lockfile"],
+        ["cargo", "generate-lockfile"],
+    ]
+    last_error: str | None = None
+    for cmd in attempts:
+        try:
+            completed = subprocess.run(  # noqa: S603,S607
+                cmd,
+                cwd=str(project_root),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            last_error = f"Command not found: {' '.join(cmd)}"
+            continue
+        if completed.returncode == 0:
+            duration = time.perf_counter() - start
+            message = f"Cargo lock regenerated via {' '.join(cmd)}"
+            return True, message, duration
+        last_error = completed.stderr.strip() or completed.stdout.strip() or f"{' '.join(cmd)} failed"
+    return False, last_error, time.perf_counter() - start
+
 def run_anchor_command(
     command: Sequence[str],
     *,
@@ -332,6 +365,26 @@ def run_anchor_build(
     if primary.success:
         return primary
 
+    regen_message: str | None = None
+    regen_duration: float = 0.0
+    if _lockfile_requires_downgrade(primary):
+        regenerated, regen_msg, regen_duration = _regenerate_lockfile(project_root)
+        if regenerated:
+            retry = run_anchor_command(
+                ["solana", "program", "build", str(program_path)],
+                cwd=project_root,
+                env=env,
+                timeout=timeout,
+            )
+            retry.metadata = {
+                "builder": "solana program build",
+                "lockfile_regenerated": True,
+                "lockfile_message": regen_msg,
+            }
+            retry.duration_secs += primary.duration_secs + regen_duration
+            return retry
+        regen_message = regen_msg
+
     fallback = run_anchor_command(
         ["anchor", "build"],
         cwd=project_root,
@@ -348,6 +401,8 @@ def run_anchor_build(
             "returncode": primary.returncode,
         },
     }
+    if regen_message:
+        fallback.metadata["lockfile_regeneration_failed"] = regen_message
     fallback.duration_secs += primary.duration_secs
     return fallback
 
