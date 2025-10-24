@@ -367,10 +367,21 @@ def _pin_incompatible_crates(project_root: Path) -> tuple[bool, str | None]:
     if "toml_datetime 0.7.3" in text or 'version = "0.7.3"' in text:
         new_text = text.replace('"toml_datetime 0.7.3"', '"toml_datetime 0.6.11"')
         block_pattern = re.compile(
-            r"\[\[package\]\]\nname = \"toml_datetime\"\nversion = \"0\.7\.3\"\n(?:.*?\n)(?=\[\[package\]\]|\Z)",
+            r"\[\[package\]\]\s*name = \"toml_datetime\"\s*version = \"0\.7\.3\"\s*(?:.*?\n)*?(?=\[\[package\]\]|\Z)",
             re.S,
         )
-        new_text, count = block_pattern.subn("", new_text)
+        replacement_block = (
+            "[[package]]\n"
+            'name = "toml_datetime"\n'
+            'version = "0.6.11"\n'
+            'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+            'checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"\n'
+            "dependencies = [\n"
+            ' "serde",\n'
+            "]\n"
+            "\n"
+        )
+        new_text, count = block_pattern.subn(replacement_block, new_text)
         if count > 0 or new_text != text:
             new_text = re.sub(r"\n{3,}", "\n\n", new_text)
             try:
@@ -427,12 +438,26 @@ def run_anchor_build(
 ) -> CommandResult:
     """Build the program, preferring `solana program build` and falling back to `anchor build` when necessary."""
     program_path = project_root / "programs" / program_name
-    primary = run_anchor_command(
-        ["solana", "program", "build", str(program_path)],
-        cwd=project_root,
-        env=env,
-        timeout=timeout,
-    )
+    try:
+        primary = run_anchor_command(
+            ["solana", "program", "build", str(program_path)],
+            cwd=project_root,
+            env=env,
+            timeout=timeout,
+        )
+    except DeployError as exc:
+        message = str(exc)
+        fallback = run_anchor_command(
+            ["anchor", "build"],
+            cwd=project_root,
+            env=env,
+            timeout=timeout,
+        )
+        fallback.metadata = {
+            "builder": "anchor build",
+            "fallback_reason": message or "solana program build unavailable; attempting anchor build instead.",
+        }
+        return fallback
     primary.metadata = {"builder": "solana program build"}
     if primary.success:
         return primary

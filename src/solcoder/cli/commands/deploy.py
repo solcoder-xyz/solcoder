@@ -129,7 +129,7 @@ def _handle_deploy(app: CLIApp, args: list[str]) -> CommandResponse:
             ]
         )
 
-    rpc_url = _configured_rpc(app)
+    rpc_url = _rpc_for_cluster(cluster, app)
     skip_build = opts.get("skip_build", False)
 
     try:
@@ -351,6 +351,21 @@ def _configured_rpc(app: CLIApp) -> str:
     if isinstance(rpc_url, str) and rpc_url.strip():
         return rpc_url.strip()
     return "https://api.devnet.solana.com"
+
+
+def _rpc_for_cluster(cluster: str, app: CLIApp) -> str:
+    mapping = {
+        "mainnet": "https://api.mainnet-beta.solana.com",
+        "mainnet-beta": "https://api.mainnet-beta.solana.com",
+        "devnet": "https://api.devnet.solana.com",
+        "testnet": "https://api.testnet.solana.com",
+    }
+    normalized = (cluster or "").strip().lower()
+    if normalized in mapping:
+        return mapping[normalized]
+    if normalized in {"localnet", "local"}:
+        return "http://127.0.0.1:8899"
+    return _configured_rpc(app)
 
 
 def _prepare_program(

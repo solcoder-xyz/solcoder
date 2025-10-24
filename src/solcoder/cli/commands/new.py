@@ -20,6 +20,7 @@ from solcoder.cli.blueprints import (
     resolve_registry_template_path,
 )
 from solcoder.cli.types import CommandResponse, CommandRouter, SlashCommand
+from solcoder.cli.commands.deploy import _rpc_for_cluster
 from solcoder.core import RenderOptions, TemplateError, available_templates, render_template
 from solcoder.solana.constants import TOKEN_2022_PROGRAM_ID
 import json
@@ -515,6 +516,7 @@ def _spl_token_quick_flow(
 
     rpc_url, config_cluster = _determine_rpc_and_cluster(app)
     cluster = cluster_hint or config_cluster
+    rpc_url = _rpc_for_cluster(cluster, app)
 
     summary_lines = [
         "Quick SPL token mint:",

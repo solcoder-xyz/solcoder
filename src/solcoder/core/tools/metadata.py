@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import shlex
 
 from solcoder.core.tools.base import Tool, Toolkit, ToolResult, ToolInvocationError
 
@@ -13,14 +14,14 @@ def _upload_handler(payload: dict[str, Any]) -> ToolResult:
     if bool(file) == bool(directory):
         raise ToolInvocationError("Provide exactly one of 'file' or 'directory'.")
     if file:
-        cmd = f"/metadata upload --file {file}"
+        cmd = shlex.join(["/metadata", "upload", "--file", str(file)])
         return ToolResult(
             content=f"Upload file via: {cmd}",
             summary="Upload file",
             data={"dispatch_command": cmd, "suppress_preview": True},
         )
     else:
-        cmd = f"/metadata upload --dir {directory}"
+        cmd = shlex.join(["/metadata", "upload", "--dir", str(directory)])
         return ToolResult(
             content=f"Upload directory via: {cmd}",
             summary="Upload directory",
@@ -56,7 +57,7 @@ def _set_handler(payload: dict[str, Any]) -> ToolResult:
     collection = payload.get("collection")
     if collection:
         parts += ["--collection", str(collection)]
-    cmd = " ".join(parts)
+    cmd = shlex.join(parts)
     return ToolResult(
         content=f"Stage metadata set via: {cmd}",
         summary="Set metadata (staged)",
@@ -109,4 +110,3 @@ def metadata_toolkit() -> Toolkit:
 
 
 __all__ = ["metadata_toolkit"]
-

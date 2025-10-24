@@ -267,6 +267,9 @@ def _write_metadata_via_spl_token(
                         messages.append(f"(warning) Unable to rewrite metadata file with remote URI: {exc}")
             except Exception as exc:  # noqa: BLE001
                 messages.append(f"(warning) Bundlr upload failed: {exc}")
+                if resolved_uri.startswith("file://"):
+                    messages.append("(warning) Aborting token-2022 metadata write because URI is still local.")
+                    return False, messages, resolved_uri
 
         with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json") as handle:
             handle.write(secret)
@@ -877,8 +880,6 @@ def register(app: CLIApp, router: CommandRouter) -> None:
             app.console.print(Panel.fit(summary_text, title=title, border_style=border))
             return CommandResponse(messages=[("system", summary_text)])
 
-        return CommandResponse(messages=[("system", "Unknown subcommand. Try '/metadata help'.")])
-
         if sub == "install":
             root = _workspace_root(app)
             lines: list[str] = []
@@ -922,6 +923,8 @@ def register(app: CLIApp, router: CommandRouter) -> None:
                 except FileNotFoundError:
                     lines.append("(warning) npm not found; skipping install.")
             return CommandResponse(messages=[("system", "\n".join(lines))])
+
+        return CommandResponse(messages=[("system", "Unknown subcommand. Try '/metadata help'.")])
 
     router.register(
         SlashCommand(

@@ -165,6 +165,9 @@ def test_pin_incompatible_crates(tmp_path: Path) -> None:
     contents = lock.read_text()
     assert "toml_datetime 0.7.3" not in contents
     assert "toml_datetime 0.6.11" in contents
+    assert 'name = "toml_datetime"' in contents
+    assert 'version = "0.6.11"' in contents
+    assert 'checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"' in contents
 
 
 def test_downgrade_lockfile_version(tmp_path: Path) -> None:

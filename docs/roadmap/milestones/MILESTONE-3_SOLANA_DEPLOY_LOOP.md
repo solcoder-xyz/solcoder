@@ -3,6 +3,8 @@
 ## Timeframe
 Day 1 (evening) – Day 2 (morning)
 
+> **Status:** Completed — Oct 24, 2025
+
 ## Objective
 Deliver the end-to-end Solana deploy experience so users can scaffold a template and ship it to devnet from inside the conversational CLI.
 

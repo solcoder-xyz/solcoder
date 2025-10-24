@@ -138,6 +138,42 @@ def test_metadata_set_run_invokes_runner(monkeypatch, tmp_path: Path) -> None:
     assert captured["uri"] == uri
 
 
+def test_metadata_set_run_aborts_when_bundlr_fails(monkeypatch, tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "Anchor.toml").write_text("[workspace]\n")
+    app.session_context.metadata.active_project = str(ws)
+    app.session_manager.save(app.session_context)
+
+    monkeypatch.setattr(md, "_is_token2022_mint", lambda mint, rpc: True)
+    def fail_bundlr(*args, **kwargs):
+        raise RuntimeError("bundlr down")
+
+    monkeypatch.setattr(md, "bundlr_upload", fail_bundlr)
+    monkeypatch.setattr(md, "_write_metadata_via_spl_token", md._write_metadata_via_spl_token)
+    status = WalletStatus(
+        exists=True,
+        public_key="Wallet111111111111111111111111111111111111111",
+        is_unlocked=False,
+        wallet_path=ws / "wallet.json",
+    )
+    status.wallet_path.write_text("[]")
+    monkeypatch.setattr(app.wallet_manager, "status", lambda: status)
+    monkeypatch.setattr(app.wallet_manager, "export_wallet", lambda passphrase: "[1,2,3]")
+
+    resp = app.handle_line(
+        "/metadata set --mint Mint11111111111111111111111111111111111111111 "
+        "--name Demo --symbol DMO --uri file:///tmp/meta.json --run"
+    )
+
+    combined = "\n".join(m for _, m in resp.messages)
+    assert "(warning) Bundlr upload failed: bundlr down" in combined
+    assert "Aborting token-2022 metadata write because URI is still local." in combined
+    assert "Token-2022 metadata initialized" not in combined
+
+
 def test_metadata_set_run_falls_back_to_runner(monkeypatch, tmp_path: Path) -> None:
     app = _make_app(tmp_path)
 
@@ -173,6 +209,33 @@ def test_metadata_set_run_falls_back_to_runner(monkeypatch, tmp_path: Path) -> N
     assert "On-chain metadata write completed via Umi runner." in combined
     assert runner_called["dir"]
     assert Path(runner_called["metadata_path"]).exists()
+
+
+def test_metadata_install_scaffolds_runners(monkeypatch, tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    ws = tmp_path / "workspace"
+    ws.mkdir(parents=True, exist_ok=True)
+    (ws / "Anchor.toml").write_text("[workspace]\n")
+    app.session_context.metadata.active_project = str(ws)
+    app.session_manager.save(app.session_context)
+
+    set_runner = ws / ".solcoder" / "metadata_runner"
+    bundlr_runner = ws / ".solcoder" / "bundlr_runner"
+    ipfs_runner = ws / ".solcoder" / "ipfs_runner"
+    for runner in (set_runner, bundlr_runner, ipfs_runner):
+        (runner / "node_modules").mkdir(parents=True, exist_ok=True)
+        (runner / "package.json").write_text("{}")
+
+    monkeypatch.setattr(md, "_write_runner", lambda _app: set_runner)
+    monkeypatch.setattr(storage, "ensure_bundlr_runner", lambda _root: bundlr_runner)
+    monkeypatch.setattr(storage, "ensure_ipfs_runner", lambda _root: ipfs_runner)
+
+    resp = app.handle_line("/metadata install")
+    combined = "\n".join(message for _, message in resp.messages)
+    assert "Prepared metadata runner" in combined
+    assert "Prepared upload runners" in combined
+    assert "Deps already installed" in combined
+    assert "Unknown subcommand" not in combined
 
 
 def test_metadata_wizard_uses_provided_defaults(tmp_path: Path) -> None:
