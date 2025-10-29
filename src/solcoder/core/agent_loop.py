@@ -78,6 +78,8 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
     pending_prompt = ctx.prompt
     plan_received = False
     rendered_roles: set[str] = set()
+    kb_citation_records: list[Any] = []
+    kb_citation_keys: set[str] = set()
     display_messages: list[tuple[str, str]] = []
     tool_summaries: list[dict[str, Any]] = []
     logger = logging.getLogger(__name__)
@@ -656,6 +658,17 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                         status: Literal["success", "error"] = "success"
                         output = tool_result.content
                         payload_data = tool_result.data
+                        if tool_name.endswith("knowledge_base_lookup") and isinstance(
+                            payload_data, dict
+                        ):
+                            raw_citations = payload_data.get("citations")
+                            if isinstance(raw_citations, list):
+                                for citation in raw_citations:
+                                    key = _citation_identity(citation)
+                                    if key in kb_citation_keys:
+                                        continue
+                                    kb_citation_keys.add(key)
+                                    kb_citation_records.append(citation)
                     except ToolRegistryError as exc:
                         status = "error"
                         output = str(exc)
@@ -737,6 +750,12 @@ def run_agent_loop(ctx: AgentLoopContext) -> CommandResponse:
                     final_message = directive.message or ""
                     if directive.step_title:
                         final_message = f"{directive.step_title}\n{final_message}"
+                    if kb_citation_records:
+                        formatted_citations = _format_kb_citations(kb_citation_records)
+                        if formatted_citations:
+                            sources_block = "\n".join(["Sources:", *formatted_citations])
+                            if "Sources:" not in final_message:
+                                final_message = f"{final_message.rstrip()}\n\n{sources_block}"
                     display_messages.append(("agent", final_message))
                     ctx.render_message("agent", final_message)
                     rendered_roles.add("agent")
@@ -941,6 +960,33 @@ def _format_plan_message(steps: list[str], preamble: str | None) -> str:
 
 def _format_tool_preview(step_title: str, content: str) -> str:
     return f"{step_title}\n{content}"
+
+
+def _citation_identity(citation: Any) -> str:
+    if isinstance(citation, dict):
+        return json.dumps(citation, sort_keys=True, default=str)
+    return str(citation)
+
+
+def _describe_kb_citation(citation: Any) -> str:
+    if isinstance(citation, dict):
+        title = citation.get("title") or citation.get("name") or citation.get("id")
+        location = citation.get("url") or citation.get("source") or citation.get("path")
+        if title and location:
+            return f"{title} ({location})"
+        if title:
+            return str(title)
+        if location:
+            return str(location)
+        return str(citation)
+    return str(citation)
+
+
+def _format_kb_citations(citations: Sequence[Any]) -> list[str]:
+    lines: list[str] = []
+    for idx, citation in enumerate(citations, 1):
+        lines.append(f"{idx}. {_describe_kb_citation(citation)}")
+    return lines
 
 
 __all__ = [

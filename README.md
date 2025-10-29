@@ -106,13 +106,16 @@ Each includes:
 - Deployment scripts and README
 
 ### 📚 **Offline Solana Knowledge Base**
-Built-in expertise on:
+Powered by a pre-built LightRAG workspace fine-tuned on Solana canon:
 - **Anchor macros** and patterns
 - **SPL Token-2022** standards
 - **Solana runtime** concepts and best practices
 - **Common pitfalls** and how to avoid them
 
-**Zero external calls**—uses local FAISS embeddings for semantic search. Stay offline-capable without losing context.
+- Query instantly from the REPL with `/kb "How does Proof of History work?"`.
+- The autonomous agent can call the `knowledge_base_lookup` tool whenever it needs protocol context.
+- Works completely offline once the workspace is unpacked locally; only your chosen LLM provider handles language generation.
+- Set `SOLCODER_KB_BACKEND=local` to use the bundled index without importing LightRAG (useful for air-gapped demos).
 
 ### ⚙️ **Smart Environment Detection**
 Missing Rust? Solana CLI? Node? SolCoder detects gaps and walks you through installation:
@@ -190,6 +193,42 @@ make install              # Global install via pipx
 make install-local        # Local editable install
 poetry run solcoder       # Launch
 ```
+
+### Knowledge Base Setup (Recommended)
+
+1. **Install dependencies & unpack the workspace**
+   ```bash
+   make setup-kb
+   ```
+   The Make target installs the vendored `LightRAG[api]` package into your Poetry
+   environment and extracts `third_party/solana-rag/solana-knowledge-pack.tgz` into
+   `var/lightrag/solana/`.
+
+2. **Verify the install**
+   ```bash
+   ls var/lightrag/solana/lightrag
+   ```
+   You should see multiple `kv_store_*.json` and `vdb_*.json` files alongside
+   `graph_chunk_entity_relation.graphml`. Re-run the setup with
+   `poetry run python scripts/setup_kb.py --force` if you need to refresh the pack.
+
+3. **Provide API credentials**
+   Ensure your `OPENAI_API_KEY` (or an alternative provider supported by SolCoder) is
+   available in the environment before running the agent or `/kb` command. Set
+   `SOLCODER_KB_BACKEND=local` to force the fully offline retrieval path when you do not
+   want to import the `LightRAG` dependency.
+
+### Using the Knowledge Base
+
+```bash
+/kb "How does Proof of History work?"
+```
+
+- Answers stream directly in the REPL together with source citations.
+- The autonomous agent can call the `knowledge_base_lookup` tool automatically whenever
+  it needs protocol context for planning or validation.
+- Override the knowledge pack location by setting `WORKING_DIR=/custom/path` before
+  launching `solcoder`.
 
 ### Your First Project (60 Seconds)
 
@@ -310,6 +349,7 @@ For quick, deterministic actions, use slash commands (no LLM):
 | `/template list` | Show available blueprint templates |
 | `/blueprint counter` | Create a Counter program from template |
 | `/new` | Initialize new Anchor workspace |
+| `/kb <question>` | Query the Solana knowledge base with citations |
 | `/init` | Convert existing folder to Anchor project |
 | `/deploy` | Build and deploy current workspace to devnet |
 | `/deploy verify` | Verify deployment on devnet |
@@ -345,6 +385,9 @@ For quick, deterministic actions, use slash commands (no LLM):
 
 # Deploy it
 /deploy
+
+# Query the Solana knowledge base
+/kb "Explain Solana rent exemptions"
 
 # Check wallet balance
 /wallet status

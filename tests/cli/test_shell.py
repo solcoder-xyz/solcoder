@@ -449,6 +449,85 @@ def test_agent_loop_runs_tool(
     assert ack_payload["status"] == "ready"
 
 
+def test_agent_loop_appends_kb_sources_to_reply(
+    console: Console,
+    session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],
+    config_context: ConfigContext,
+) -> None:
+    manager, context, wallet_manager, rpc_stub = session_bundle
+    registry = build_default_registry()
+
+    citations = [
+        {"title": "Solana Whitepaper", "url": "https://example.com/solana-whitepaper.pdf"}
+    ]
+
+    def kb_handler(payload: dict[str, Any]) -> ToolResult:
+        return ToolResult(
+            content="Summary about Solana.",
+            data={"citations": list(citations)},
+        )
+
+    registry.register(
+        Tool(
+            name="knowledge_base_lookup",
+            description="Stub knowledge base lookup",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+            output_schema={"type": "object"},
+            handler=kb_handler,
+        ),
+        overwrite=True,
+    )
+
+    script = [
+        {
+            "expect": expect_equals("kb please"),
+            "reply": {
+                "type": "plan",
+                "message": "Consulting KB",
+                "steps": ["Call knowledge base"],
+            },
+        },
+        {
+            "expect": expect_plan_ack(False),
+            "reply": {
+                "type": "tool_request",
+                "step_title": "Call knowledge base",
+                "tool": {"name": "knowledge_base_lookup", "args": {"query": "Tell me"}},
+            },
+        },
+        {
+            "expect": expect_tool_result("knowledge_base_lookup"),
+            "reply": {"type": "reply", "message": "Here you go"},
+        },
+    ]
+    llm = ScriptedLLM(script)
+
+    app = CLIApp(
+        console=console,
+        llm=llm,
+        session_manager=manager,
+        session_context=context,
+        wallet_manager=wallet_manager,
+        rpc_client=rpc_stub,
+        config_context=config_context,
+        tool_registry=registry,
+    )
+
+    response = app.handle_line("kb please")
+
+    agent_messages = [message for role, message in response.messages if role == "agent"]
+    assert agent_messages, "Expected at least one agent message"
+    assert (
+        "Sources:\n1. Solana Whitepaper (https://example.com/solana-whitepaper.pdf)"
+        in agent_messages[-1]
+    )
+    assert llm.script == []
+
+
 def test_agent_loop_recovers_from_invalid_json(
     console: Console,
     session_bundle: tuple[SessionManager, object, WalletManager, RPCStub],

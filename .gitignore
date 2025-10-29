@@ -36,6 +36,7 @@ logs/
 tmp_keys*/
 llm_raw_response.json
 workspace/
+var/
 
 # Editors
 .idea/

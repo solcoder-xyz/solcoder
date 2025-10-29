@@ -72,7 +72,7 @@ def test_default_registry_contains_expected_tools() -> None:
     assert "generate_review_checklist" in tool_names
     assert "create_deploy_checklist" in tool_names
     assert "collect_env_diagnostics" in tool_names
-    assert "lookup_knowledge" in tool_names
+    assert "knowledge_base_lookup" in tool_names
     assert "execute_shell_command" in tool_names
 
     toolkits = registry.available_toolkits()
@@ -88,6 +88,27 @@ def test_command_run_executes_shell(tmp_path: Path) -> None:
     )
     assert "hello" in result.content
     assert result.data["returncode"] == 0
+
+
+def test_knowledge_tool_invokes_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = build_default_registry()
+    tool = registry.get("knowledge_base_lookup")
+    assert tool.name == "knowledge_base_lookup"
+
+    calls: list[str] = []
+
+    class FakeClient:
+        def query(self, question: str):
+            calls.append(question)
+            return type("Answer", (), {"text": "Solana answer", "citations": [{"title": "Doc", "url": "http://docs"}]})
+
+    monkeypatch.setattr("solcoder.core.tools.knowledge._KB_CLIENT", FakeClient())
+    result = registry.invoke("knowledge_base_lookup", {"query": "Test query"})
+
+    assert calls == ["Test query"]
+    assert "Solana answer" in result.content
+    assert "Doc" in result.content
+    assert result.data["query"] == "Test query"
 
 
 def test_diagnostics_tool_serializes_dataclass(monkeypatch: pytest.MonkeyPatch) -> None:

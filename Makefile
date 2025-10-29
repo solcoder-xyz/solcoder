@@ -1,4 +1,4 @@
-.PHONY: install reinstall uninstall build install-local
+.PHONY: install reinstall uninstall build install-local setup-kb
 
 build:
 	poetry build
@@ -19,3 +19,6 @@ uninstall:
 install-local:
 	pip install -e .
 
+setup-kb:
+	poetry run pip install -e "third_party/solana-rag/LightRAG[api]"
+	poetry run python scripts/setup_kb.py
