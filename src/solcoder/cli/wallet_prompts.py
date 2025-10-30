@@ -6,7 +6,11 @@ from typing import Optional
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.layout.processors import PasswordProcessor
 from rich.console import Console
+
+
+_MASKING_PROCESSORS = (PasswordProcessor(char=""),)
 
 
 def prompt_secret(
@@ -25,8 +29,10 @@ def prompt_secret(
     while True:
         # Temporarily disable persistent history to avoid storing secrets.
         old_history = getattr(session.default_buffer, "history", None)
+        old_processors = list(getattr(session.default_buffer, "input_processors", ()) or [])
         try:
             session.default_buffer.history = InMemoryHistory()  # type: ignore[assignment]
+            session.default_buffer.input_processors = list(_MASKING_PROCESSORS)
             try:
                 value = session.prompt(f"{message}: ", is_password=True)
                 if not confirmation:
@@ -36,17 +42,16 @@ def prompt_secret(
                     return value
                 console.print("[red]Passphrases do not match. Try again.[/red]")
             finally:
-                # Ensure subsequent prompts are not masked in case PromptSession retains the flag
                 try:
-                    # Newer prompt_toolkit uses `.is_password`; older may use `.password`
-                    if hasattr(session.default_buffer, "is_password"):
-                        session.default_buffer.is_password = False  # type: ignore[attr-defined]
-                    if hasattr(session.default_buffer, "password"):
-                        session.default_buffer.password = False  # type: ignore[attr-defined]
+                    session.default_buffer.reset()  # clear any masked characters from the buffer
                 except Exception:
                     pass
+                try:
+                    session.default_buffer.is_password = False  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                session.default_buffer.input_processors = old_processors
         finally:
-            # Restore original history provider
             try:
                 if old_history is not None:
                     session.default_buffer.history = old_history  # type: ignore[assignment]
